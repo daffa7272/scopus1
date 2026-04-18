@@ -1,6 +1,6 @@
 """
 =============================================================================
-SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE MASTER EDITION)
+SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
 =============================================================================
 Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
 dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
@@ -8,9 +8,9 @@ dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
 Versi Enterprise ini dilengkapi dengan:
 - Natural Language Processing (NLP)
 - Machine Learning Topic Modeling (LDA)
-- Semantic Information Retrieval (TF-IDF Cosine Similarity)
+- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
 - Geo-spatial Choropleth Mapping
-- Advanced Graph Topology (NetworkX)
+- Advanced Graph Topology (NetworkX & Pyvis)
 - Generative AI Integration (Mistral, Gemini)
 - Local Storage Persistence (Penyimpanan API & Konfigurasi)
 =============================================================================
@@ -28,7 +28,7 @@ import json
 import math
 import logging
 import datetime
-import gc  # FIX: Modul Garbage Collector untuk optimalisasi RAM
+import gc  # Modul Garbage Collector untuk optimalisasi RAM
 from collections import Counter, defaultdict
 import io
 import xml.etree.ElementTree as ET # Modul GEXF Export
@@ -66,6 +66,7 @@ def save_settings(settings_dict):
 try:
     from wordcloud import WordCloud
     import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
     HAS_WORDCLOUD = True
 except ImportError:
     HAS_WORDCLOUD = False
@@ -96,6 +97,13 @@ try:
 except ImportError:
     HAS_PLOTLY = False
     logging.warning("Modul Plotly tidak terdeteksi.")
+
+try:
+    from pyvis.network import Network
+    HAS_PYVIS = True
+except ImportError:
+    HAS_PYVIS = False
+    logging.warning("Modul Pyvis tidak terdeteksi.")
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
@@ -387,17 +395,19 @@ def calculate_lotkas_law(df: pd.DataFrame, author_col: str) -> pd.DataFrame:
 
 # ===============================================
 # TRUE BIBLIOMETRIX ENGINE (EXACT MATCH FORMULAS)
+# CACHED TO OPTIMIZE RE-RENDERS
 # ===============================================
 
 def preprocess_keywords(df, field="ID", delimiter=";", is_author=False):
     df_clean = df.copy()
     def process(x):
-        if pd.isna(x): return []
+        if pd.isna(x): return tuple() # Changed to tuple for caching hashability
         words = [k.strip().title() if is_author else k.strip().lower() for k in str(x).split(delimiter)]
-        return [w for w in words if w and w.lower() not in COMMON_STOPWORDS and w.lower() not in ["tidak tersedia", "n/a", "no title"]]
+        return tuple([w for w in words if w and w.lower() not in COMMON_STOPWORDS and w.lower() not in ["tidak tersedia", "n/a", "no title"]])
     df_clean[field] = df_clean[field].apply(process)
     return df_clean
 
+@st.cache_resource(show_spinner=False)
 def build_cooccurrence(df, field="ID", minfreq=5):
     word_counts = Counter()
     for kws in df[field]:
@@ -419,15 +429,16 @@ def build_cooccurrence(df, field="ID", minfreq=5):
                 G.add_edge(w1, w2, weight=1)
     return G, word_counts
 
-def normalize_network(G, method="Equivalence"):
+@st.cache_resource(show_spinner=False)
+def normalize_network(_G, method="Equivalence"):
     G_norm = nx.Graph()
-    for node, data in G.nodes(data=True):
+    for node, data in _G.nodes(data=True):
         G_norm.add_node(node, **data)
 
-    for u, v, data in G.edges(data=True):
+    for u, v, data in _G.edges(data=True):
         c_ij = data['weight']
-        c_i = G.nodes[u]['freq']
-        c_j = G.nodes[v]['freq']
+        c_i = _G.nodes[u]['freq']
+        c_j = _G.nodes[v]['freq']
         
         if method == "Association":
             weight = c_ij / (c_i * c_j) if (c_i * c_j) > 0 else 0
@@ -446,12 +457,13 @@ def normalize_network(G, method="Equivalence"):
             G_norm.add_edge(u, v, weight=weight, raw_weight=c_ij)
     return G_norm
 
-def filter_edges(G, min_raw_weight=1, min_norm_weight=0.0):
+@st.cache_resource(show_spinner=False)
+def filter_edges(_G, min_raw_weight=1, min_norm_weight=0.0):
     G_f = nx.Graph()
-    for node, data in G.nodes(data=True):
+    for node, data in _G.nodes(data=True):
         G_f.add_node(node, **data)
 
-    for u, v, data in G.edges(data=True):
+    for u, v, data in _G.edges(data=True):
         raw_w = data.get('raw_weight', data.get('weight', 1))
         norm_w = data.get('weight', 0)
         
@@ -459,30 +471,31 @@ def filter_edges(G, min_raw_weight=1, min_norm_weight=0.0):
             G_f.add_edge(u, v, **data)
     return G_f
 
-def detect_clusters(G, method="Louvain"):
+@st.cache_resource(show_spinner=False)
+def detect_clusters(_G, method="Louvain"):
     if method == "Louvain" and HAS_LOUVAIN:
-        partition = community_louvain.best_partition(G, weight='weight', random_state=42)
+        partition = community_louvain.best_partition(_G, weight='weight', random_state=42)
         clusters = {}
         for node, cid in partition.items():
             clusters.setdefault(cid, []).append(node)
         comms = list(clusters.values())
     elif method == "Betweenness":
         try:
-            comms = next(nx_comm.girvan_newman(G))
+            comms = next(nx_comm.girvan_newman(_G))
         except:
-            comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
+            comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
     elif method in ["InfoMap", "Walktrap", "Spinglass", "Leiden", "Leading Eigenvector"]:
         if method == "InfoMap":
-            comms = list(nx_comm.label_propagation_communities(G))
+            comms = list(nx_comm.label_propagation_communities(_G))
         else:
-            comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
+            comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
     else:
-        comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
+        comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
         
     comms = sorted([list(c) for c in comms], key=lambda c: (-len(c), sorted(c)[0]))
     return comms
 
-def compute_callon_metrics(G, communities, word_counts):
+def compute_callon_metrics(_G, communities, word_counts):
     theme_data = []
     for i, comm in enumerate(communities):
         if len(comm) < 2: continue
@@ -490,12 +503,12 @@ def compute_callon_metrics(G, communities, word_counts):
         comm_sorted = sorted(comm, key=lambda x: word_counts.get(x, 0), reverse=True)
         cluster_name = comm_sorted[0].title()
 
-        subgraph = G.subgraph(comm)
+        subgraph = _G.subgraph(comm)
         internal_weight = subgraph.size(weight='weight')
         n = len(comm)
         density = (internal_weight * 100) / n if n > 0 else 0
 
-        total_weight = sum(G.degree(u, weight='weight') for u in comm)
+        total_weight = sum(_G.degree(u, weight='weight') for u in comm)
         external_weight = total_weight - (2 * internal_weight)
         centrality = external_weight * 10
 
@@ -563,7 +576,7 @@ def ppm_distance(s1: str, s2: str) -> float:
 # ==============================
 # ALGORITMA GRAPH EXPORTER (GEXF)
 # ==============================
-def generate_gexf_string(G: nx.Graph) -> bytes:
+def generate_gexf_string(_G: nx.Graph) -> bytes:
     gexf = ET.Element('gexf', xmlns="http://www.gexf.net/1.2draft", version="1.2")
     graph = ET.SubElement(gexf, 'graph', mode="static", defaultedgetype="undirected")
     
@@ -571,14 +584,14 @@ def generate_gexf_string(G: nx.Graph) -> bytes:
     ET.SubElement(attributes, 'attribute', id="0", title="weight", type="integer")
     
     nodes_elem = ET.SubElement(graph, 'nodes')
-    for node in G.nodes():
+    for node in _G.nodes():
         node_elem = ET.SubElement(nodes_elem, 'node', id=node, label=node)
         attvalues = ET.SubElement(node_elem, 'attvalues')
-        ET.SubElement(attvalues, 'attvalue', {'for': "0", 'value': str(G.nodes[node].get('freq', 1))})
+        ET.SubElement(attvalues, 'attvalue', {'for': "0", 'value': str(_G.nodes[node].get('freq', 1))})
         
     edges_elem = ET.SubElement(graph, 'edges')
-    for i, (u, v) in enumerate(G.edges()):
-        edge_weight = G[u][v].get('raw_weight', G[u][v].get('weight', 1))
+    for i, (u, v) in enumerate(_G.edges()):
+        edge_weight = _G[u][v].get('raw_weight', _G[u][v].get('weight', 1))
         ET.SubElement(edges_elem, 'edge', id=str(i), source=u, target=v, weight=str(edge_weight))
         
     return ET.tostring(gexf, encoding='utf-8', xml_declaration=True)
@@ -596,6 +609,20 @@ if 'preview_new' not in st.session_state: st.session_state.preview_new = None
 if 'chat_messages' not in st.session_state: st.session_state.chat_messages = []
 if 'map_rendered' not in st.session_state: st.session_state.map_rendered = False
 
+@st.cache_data
+def get_column_mappings(columns_tuple):
+    """Mendeteksi nama kolom spesifik hanya sekali dan menyimpannya di memori."""
+    columns = list(columns_tuple)
+    return {
+        'year_col': next((col for col in ['Tahun', 'Year', 'year', 'PY', 'Publication Year'] if col in columns), None),
+        'journal_col': next((col for col in ['Jurnal', 'Source title', 'Journal', 'SO'] if col in columns), None),
+        'author_col': next((col for col in ['Penulis', 'Authors', 'Author', 'AU'] if col in columns), None),
+        'title_col': next((col for col in ['Judul', 'Title', 'title', 'Document Title', 'TI'] if col in columns), None),
+        'citation_col': next((col for col in ['Citasi', 'Cited by', 'citedby-count', 'TC'] if col in columns), None),
+        'abstract_col': next((col for col in ['Abstract', 'abstract', 'Description', 'AB'] if col in columns), None),
+        'affiliation_col': next((col for col in ['Negara Afiliasi', 'Affiliation', 'Affiliations', 'C1'] if col in columns), None)
+    }
+
 def apply_transform(func, action_name, is_row_filter=False, target_col=None):
     base_df = st.session_state.history[st.session_state.current_step].copy()
     st.session_state.preview_original = base_df[target_col].copy() if target_col else None
@@ -607,9 +634,10 @@ def apply_transform(func, action_name, is_row_filter=False, target_col=None):
         new_df[target_col] = func(new_df[target_col])
         st.session_state.preview_new = new_df[target_col].copy()
     
-    # Garbage Collection / Trim history for memory
-    st.session_state.history = st.session_state.history[max(0, st.session_state.current_step - 2):st.session_state.current_step + 1]
-    st.session_state.history_actions = st.session_state.history_actions[max(0, st.session_state.current_step - 2):st.session_state.current_step + 1]
+    # Batasi history max 3 langkah untuk menghemat RAM (Garbage Collection Fix)
+    MAX_HISTORY = 3
+    st.session_state.history = st.session_state.history[max(0, st.session_state.current_step - MAX_HISTORY + 1):st.session_state.current_step + 1]
+    st.session_state.history_actions = st.session_state.history_actions[max(0, st.session_state.current_step - MAX_HISTORY + 1):st.session_state.current_step + 1]
     st.session_state.current_step = len(st.session_state.history) - 1
     
     st.session_state.history.append(new_df)
@@ -673,14 +701,12 @@ with st.sidebar:
             new_settings = user_prefs.copy()
             new_settings["scopus_key"] = SCOPUS_API_KEY
             new_settings["ai_provider"] = AI_PROVIDER
-            
             if AI_PROVIDER == "Mistral":
                 new_settings["mistral_key"] = AI_API_KEY
                 new_settings["mistral_model"] = AI_MODEL
             elif AI_PROVIDER == "Google Gemini":
                 new_settings["gemini_key"] = AI_API_KEY
                 new_settings["gemini_model"] = AI_MODEL
-                
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
 
@@ -724,26 +750,41 @@ elif menu_selection == "📥 Data Acquisition":
                 st.warning("⚠️ Masukkan query pencarian.")
             else:
                 with st.spinner("Mengunduh data dari Elsevier (Scopus)..."):
-                    url = f"https://api.elsevier.com/content/search/scopus?query={query}&count={max_results}&view=COMPLETE&apiKey={SCOPUS_API_KEY}"
-                    resp = requests.get(url, headers={'Accept': 'application/json'})
+                    # Paginasi Otomatis (Fix limit 200)
+                    all_entries = []
+                    start_idx = 0
                     
-                    if resp.status_code in [401, 403]:
-                        st.toast("⚠️ Akses institusi Scopus tidak terdeteksi. Menggunakan mode Fallback (Tanpa Abstrak)...", icon="🔄")
-                        url = f"https://api.elsevier.com/content/search/scopus?query={query}&count={max_results}&apiKey={SCOPUS_API_KEY}"
+                    while len(all_entries) < max_results:
+                        fetch_count = min(200, max_results - len(all_entries))
+                        url = f"https://api.elsevier.com/content/search/scopus?query={query}&count={fetch_count}&start={start_idx}&view=COMPLETE&apiKey={SCOPUS_API_KEY}"
                         resp = requests.get(url, headers={'Accept': 'application/json'})
+                        
+                        if resp.status_code == 200:
+                            data_chunk = resp.json().get('search-results', {}).get('entry', [])
+                            if not data_chunk: break # Data sudah habis di server
+                            all_entries.extend(data_chunk)
+                            start_idx += fetch_count
+                        elif resp.status_code in [401, 403]:
+                            st.toast("⚠️ Akses institusi Scopus tidak terdeteksi. Menggunakan mode Fallback (Tanpa Abstrak)...", icon="🔄")
+                            url = f"https://api.elsevier.com/content/search/scopus?query={query}&count={max_results}&apiKey={SCOPUS_API_KEY}"
+                            resp_fallback = requests.get(url, headers={'Accept': 'application/json'})
+                            if resp_fallback.status_code == 200:
+                                all_entries = resp_fallback.json().get('search-results', {}).get('entry', [])
+                            else:
+                                st.error(f"❌ Terjadi Error API {resp_fallback.status_code}: {resp_fallback.text}")
+                            break
+                        else:
+                            st.error(f"❌ Terjadi Error API {resp.status_code}: {resp.text}")
+                            break
 
-                    if resp.status_code == 200:
-                        loaded_data = clean_scopus_data(resp.json())
+                    if all_entries:
+                        loaded_data = clean_scopus_data({'search-results': {'entry': all_entries}})
                         st.session_state.history = [loaded_data]
                         st.session_state.history_actions = ["Data Awal (Scopus API)"]
                         st.session_state.current_step = 0
                         st.session_state.preview_action = None
-                        
                         st.session_state.map_rendered = False
-                        
                         st.success(f"✅ Berhasil menarik {len(loaded_data)} dokumen! Silakan pilih menu lain di Sidebar untuk mulai menganalisis.")
-                    else: 
-                        st.error(f"❌ Terjadi Error API {resp.status_code}: {resp.text}")
 
     with col2:
         st.markdown("#### 📁 Opsi 2: Unggah File Lokal (Local Data)")
@@ -760,9 +801,7 @@ elif menu_selection == "📥 Data Acquisition":
                     st.session_state.current_step = 0
                     st.session_state.last_file = uploaded_file.name
                     st.session_state.preview_action = None
-                    
                     st.session_state.map_rendered = False
-                    
                     st.success(f"✅ Memuat {len(loaded_data)} baris data! Silakan pilih menu di Sidebar untuk melanjutkan.")
                 except Exception as e: 
                     st.error(f"❌ Gagal memproses file: Kesalahan Parsing -> {e}")
@@ -774,14 +813,15 @@ elif len(st.session_state.history) > 0:
     base_data = st.session_state.history[st.session_state.current_step].copy()
     data = base_data.copy() 
 
-    # ====== DETEKSI NAMA KOLOM DINAMIS ======
-    year_col = next((col for col in ['Tahun', 'Year', 'year', 'PY', 'Publication Year'] if col in data.columns), None)
-    journal_col = next((col for col in ['Jurnal', 'Source title', 'Journal', 'SO'] if col in data.columns), None)
-    author_col = next((col for col in ['Penulis', 'Authors', 'Author', 'AU'] if col in data.columns), None)
-    title_col = next((col for col in ['Judul', 'Title', 'title', 'Document Title', 'TI'] if col in data.columns), None)
-    citation_col = next((col for col in ['Citasi', 'Cited by', 'citedby-count', 'TC'] if col in data.columns), None)
-    abstract_col = next((col for col in ['Abstract', 'abstract', 'Description', 'AB'] if col in data.columns), None)
-    affiliation_col = next((col for col in ['Negara Afiliasi', 'Affiliation', 'Affiliations', 'C1'] if col in data.columns), None)
+    # ====== DETEKSI NAMA KOLOM DINAMIS (CACHED) ======
+    col_mappings = get_column_mappings(tuple(data.columns))
+    year_col = col_mappings['year_col']
+    journal_col = col_mappings['journal_col']
+    author_col = col_mappings['author_col']
+    title_col = col_mappings['title_col']
+    citation_col = col_mappings['citation_col']
+    abstract_col = col_mappings['abstract_col']
+    affiliation_col = col_mappings['affiliation_col']
 
     # ---------------------------------------------------------
     # MENU 2: OVERVIEW & TRENDS
@@ -829,7 +869,7 @@ elif len(st.session_state.history) > 0:
         st.markdown("---")
         st.markdown("#### 📈 Analisis Deskriptif Bibliometrik Dasar")
         
-        tab_stats1, tab_stats2, tab_stats3, tab_stats4 = st.tabs(["📊 Produksi & Sitasi", "🏢 Hukum Kinerja (Lotka & Bradford)", "🗺️ Peta Produksi Negara", "🧠 Topic Modeling (LDA)"])
+        tab_stats1, tab_stats2, tab_stats3, tab_stats4, tab_stats5 = st.tabs(["📊 Produksi & Sitasi", "🏢 Hukum Kinerja (Lotka & Bradford)", "🗺️ Peta Produksi Negara", "🧠 Topic Modeling (LDA)", "☁️ Word Cloud"])
         
         # SUBTAB: PRODUKSI
         with tab_stats1:
@@ -837,7 +877,11 @@ elif len(st.session_state.history) > 0:
             with col_c1:
                 if year_col:
                     st.markdown("**1. Produksi Dokumen Per Tahun**")
-                    st.area_chart(data[year_col].value_counts().sort_index(), color="#4a90e2") 
+                    yearly_counts = data[year_col].value_counts().sort_index()
+                    fig_year = px.area(x=yearly_counts.index, y=yearly_counts.values, labels={'x': 'Tahun Publikasi', 'y': 'Jumlah Dokumen'})
+                    fig_year.update_traces(line_color='#4a90e2', fillcolor='rgba(74, 144, 226, 0.3)')
+                    fig_year.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis=dict(dtick=1))
+                    st.plotly_chart(fig_year, use_container_width=True)
                 
                 if citation_col and title_col:
                     st.markdown("**2. Top 5 Dokumen Paling Banyak Dikutip (High-Impact Papers)**")
@@ -849,11 +893,22 @@ elif len(st.session_state.history) > 0:
                 if author_col:
                     st.markdown("**3. Penulis Paling Produktif (Berdasarkan Frekuensi Kemunculan)**")
                     all_authors = data[author_col].dropna().astype(str).str.split(";").explode().str.strip()
-                    st.bar_chart(all_authors[all_authors != ""].value_counts().head(10), color="#e74c3c")
+                    top_authors = all_authors[all_authors != ""].value_counts().head(10)
+                    fig_auth = px.bar(x=top_authors.index, y=top_authors.values, text=top_authors.values, labels={'x':'Penulis', 'y':'Jumlah Dokumen'})
+                    fig_auth.update_traces(marker_color='#e74c3c', textposition='outside')
+                    max_y_auth = top_authors.values.max() if len(top_authors) > 0 else 10
+                    fig_auth.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis_tickangle=-45, yaxis=dict(range=[0, max_y_auth * 1.2]))
+                    st.plotly_chart(fig_auth, use_container_width=True)
                     
                 if journal_col:
                     st.markdown("**4. Sumber / Jurnal Penerbit Teratas**")
-                    st.bar_chart(data[journal_col].value_counts().head(10), color="#2ecc71")
+                    top_j = data[journal_col].value_counts().head(10)
+                    short_labels = [str(label)[:25] + '...' if len(str(label)) > 25 else str(label) for label in top_j.index]
+                    fig_j = px.bar(x=short_labels, y=top_j.values, text=top_j.values, labels={'x':'Jurnal', 'y':'Jumlah Dokumen'})
+                    fig_j.update_traces(marker_color='#2ecc71', textposition='outside')
+                    max_y_jour = top_j.values.max() if len(top_j) > 0 else 10
+                    fig_j.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis_tickangle=-45, yaxis=dict(range=[0, max_y_jour * 1.2]))
+                    st.plotly_chart(fig_j, use_container_width=True)
                     
         # SUBTAB: BRADFORD & LOTKA
         with tab_stats2:
@@ -959,6 +1014,24 @@ elif len(st.session_state.history) > 0:
                                 st.error(f"⚠️ Algoritma LDA gagal: Vocabulary kosong (terlalu banyak stopwords yang terfilter atau jumlah data terlalu sedikit). Detail: {str(e)}")
                             
                             gc.collect()
+        
+        # SUBTAB: WORD CLOUD
+        with tab_stats5:
+            st.markdown("**Pemetaan Visual Frekuensi Kata Dasar**")
+            st.caption("Eksplorasi cepat kata-kata dominan dari keseluruhan dataset naratif.")
+            if not HAS_WORDCLOUD:
+                st.warning("⚠️ Modul WordCloud tidak terinstal. Ketik `pip install wordcloud`.")
+            else:
+                wc_col = st.selectbox("Pilih Kolom Sumber Kata:", [abstract_col, title_col] if abstract_col else [title_col], key="wc_col")
+                if wc_col and st.button("☁️ Render Word Cloud", type="primary"):
+                    with st.spinner("Mengekstrak frekuensi leksikal..."):
+                        text = " ".join(data[wc_col].dropna().astype(str))
+                        wordcloud = WordCloud(width=1000, height=500, background_color='white', stopwords=COMMON_STOPWORDS, colormap='viridis').generate(text)
+                        
+                        fig_wc, ax_wc = plt.subplots(figsize=(12, 6))
+                        ax_wc.imshow(wordcloud, interpolation='bilinear')
+                        ax_wc.axis("off")
+                        st.pyplot(fig_wc)
 
     # ---------------------------------------------------------
     # MENU 3: DATA CLEANING (OPENREFINE)
@@ -1033,8 +1106,10 @@ elif len(st.session_state.history) > 0:
                     st.dataframe(facet_df, height=200, use_container_width=True)
 
                 st.markdown("---")
+                
+                # REORDERED DATA CLEANING UI
                 st.markdown("**✂️ A. Pecah Sel Multi-Nilai (Split Multi-valued Cells)**")
-                st.caption("Penting dilakukan untuk kolom 'Penulis' atau 'Author Keywords' agar setiap entitas dipisah menjadi barisnya sendiri untuk kalkulasi pemetaan jaringan yang akurat.")
+                st.caption("Penting dilakukan untuk kolom 'Penulis' atau 'Author Keywords' agar setiap entitas dipisah menjadi barisnya sendiri.")
                 col_sd1, col_sd2 = st.columns([3, 1])
                 with col_sd1:
                     split_delim = st.selectbox("Pemisah (Delimiter):", ["Titik Koma (;)", "Koma (,)", "Pemisah Garis Lurus (|)", "Spasi ( )"], label_visibility="collapsed")
@@ -1051,7 +1126,12 @@ elif len(st.session_state.history) > 0:
                         apply_transform(split_cells, f"Split Cells '{target_clean_col}' by '{actual_delim}'", is_row_filter=True, target_col=target_clean_col)
 
                 st.markdown("---")
-                st.markdown("**✨ B. Transformasi Teks Instan**")
+                st.markdown("**✂️ B. Trim Extra Whitespace**")
+                if st.button("Hilangkan Spasi Ganda yang Berlebihan", use_container_width=True):
+                    apply_transform(lambda col: col.astype(str).apply(lambda x: " ".join(x.split()) if isinstance(x, str) else x), f"Trim Spasi '{target_clean_col}'", target_col=target_clean_col)
+
+                st.markdown("---")
+                st.markdown("**✨ C. Transformasi Teks Instan**")
                 col_case1, col_case2, col_case3 = st.columns(3)
                 if col_case1.button("UPPERCASE", use_container_width=True):
                     apply_transform(lambda col: col.astype(str).str.upper(), f"To UPPERCASE '{target_clean_col}'", target_col=target_clean_col)
@@ -1060,18 +1140,14 @@ elif len(st.session_state.history) > 0:
                 if col_case3.button("Title Case", use_container_width=True):
                     apply_transform(lambda col: col.astype(str).str.title(), f"To Title Case '{target_clean_col}'", target_col=target_clean_col)
 
-                col_trim, col_blank = st.columns(2)
-                with col_trim:
-                    if st.button("✂️ Trim Extra Whitespace", use_container_width=True):
-                        apply_transform(lambda col: col.astype(str).apply(lambda x: " ".join(x.split()) if isinstance(x, str) else x), f"Trim Spasi '{target_clean_col}'", target_col=target_clean_col)
-                with col_blank:
-                    if st.button("🗑️ Drop Empty Rows", use_container_width=True):
-                        def remove_blank_rows(df):
-                            mask = df[target_clean_col].astype(str).str.strip().str.lower().isin(["", "nan", "none", "tidak tersedia"])
-                            return df[~mask]
-                        apply_transform(remove_blank_rows, f"Hapus Baris Kosong '{target_clean_col}'", is_row_filter=True, target_col=target_clean_col)
+                st.markdown("---")
+                st.markdown("**🗑️ D. Hapus Baris Kosong & Find Replace**")
+                if st.button("Drop Baris Mengandung Data Kosong (NaN/Tidak Tersedia)", use_container_width=True):
+                    def remove_blank_rows(df):
+                        mask = df[target_clean_col].astype(str).str.strip().str.lower().isin(["", "nan", "none", "tidak tersedia"])
+                        return df[~mask]
+                    apply_transform(remove_blank_rows, f"Hapus Baris Kosong '{target_clean_col}'", is_row_filter=True, target_col=target_clean_col)
                 
-                st.markdown("**🔍 C. Find & Replace (Regex Off)**")
                 col_f, col_r = st.columns(2)
                 with col_f:
                     find_txt = st.text_input("Teks dicari:", placeholder="Old")
@@ -1084,7 +1160,7 @@ elif len(st.session_state.history) > 0:
                         st.warning("Kotak 'Teks dicari' tidak boleh kosong.")
 
                 st.markdown("---")
-                st.markdown("**🧠 D. Clustering / Penggabungan Varian Kata**")
+                st.markdown("**🧠 E. Clustering / Penggabungan Varian Kata**")
                 st.caption("Deteksi typo, singkatan, atau pluralitas dan gabungkan menjadi satu istilah standar.")
                 method = st.selectbox("Algoritma Deteksi:", ["Fingerprint", "N-Gram (2-gram)", "Phonetic (Soundex)", "Levenshtein Distance", "PPM (Compression)"])
                 delimiter_opt = st.selectbox("Multi-value Delimiter Target:", ["Tidak Ada", "Titik Koma (;)", "Koma (,)", "Pemisah Garis Lurus (|)"])
@@ -1108,6 +1184,10 @@ elif len(st.session_state.history) > 0:
                             kw_freq = kw_series.value_counts().to_dict()
                             unique_kws = list(kw_freq.keys())
                             
+                            # Cek Overload
+                            if len(unique_kws) > 1000 and method in ["Levenshtein Distance", "PPM (Compression)"]:
+                                st.warning(f"⚠️ Terdeteksi {len(unique_kws)} entitas unik. Algoritma {method} mungkin memakan waktu lebih lama karena kompleksitas O(N²).")
+
                             valid_clusters = {}
                             if method in ["Fingerprint", "N-Gram (2-gram)", "Phonetic (Soundex)"]:
                                 clusters = {}
@@ -1132,8 +1212,11 @@ elif len(st.session_state.history) > 0:
                                         kw2 = unique_kws[j]
                                         if kw2 in visited: continue
                                         match = False
-                                        if method == "Levenshtein Distance" and levenshtein(kw1.lower(), kw2.lower(), lev_threshold) <= lev_threshold: match = True
+                                        if method == "Levenshtein Distance":
+                                            if abs(len(kw1) - len(kw2)) <= lev_threshold and levenshtein(kw1.lower(), kw2.lower(), lev_threshold) <= lev_threshold: 
+                                                match = True
                                         elif method == "PPM (Compression)" and ppm_distance(kw1.lower(), kw2.lower()) <= ppm_threshold: match = True
+                                        
                                         if match:
                                             current_cluster.append(kw2)
                                             visited.add(kw2)
@@ -1158,7 +1241,7 @@ elif len(st.session_state.history) > 0:
                                         elif AI_PROVIDER == "Google Gemini": ai_response = call_gemini_sync(sys_prompt_ai, usr_prompt_ai, AI_API_KEY, AI_MODEL)
                                             
                                         try:
-                                            match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+                                            match = re.search(r'\{[\s\S]*\}', ai_response)
                                             ai_suggestions = json.loads(match.group(0)) if match else json.loads(ai_response)
                                         except Exception as e:
                                             st.warning("⚠️ Gagal memparsing JSON dari respon AI. Jatuh kembali ke mode Manual / Bawaan.")
@@ -1221,7 +1304,7 @@ elif len(st.session_state.history) > 0:
                     if st.button("✖️ Tutup Panel Pratinjau"):
                         st.session_state.preview_action = None
                         st.rerun()
-                    st.markdown("---")
+                st.markdown("---")
                 
                 if st.session_state.clustering_result is not None:
                     st.write(f"⚠️ Ditemukan **{len(st.session_state.clustering_result['ID Klaster'].unique())}** grup variasi kata.")
@@ -1308,13 +1391,16 @@ elif len(st.session_state.history) > 0:
                 
                 for i in range(min(num_samples, len(ai_data))):
                     doc_text = str(ai_data[target_col].iloc[i])
+                    # Potong panjang abstrak max 1500 char untuk hemat token API
+                    doc_text_safe = doc_text[:1500] + "..." if len(doc_text) > 1500 else doc_text
+
                     if title_col:
                         doc_title = str(ai_data[title_col].iloc[i])
                         sampled_titles.append(f"**[{i+1}]** {doc_title}")
-                        docs_to_process.append(f"Dokumen {i+1} [TI: {doc_title}]:\n{doc_text}\n\n")
+                        docs_to_process.append(f"Dokumen {i+1} [TI: {doc_title}]:\n{doc_text_safe}\n\n")
                     else:
                         sampled_titles.append(f"**[{i+1}]** (Metadata Judul tidak direferensikan)")
-                        docs_to_process.append(f"Dokumen {i+1}:\n{doc_text}\n\n")
+                        docs_to_process.append(f"Dokumen {i+1}:\n{doc_text_safe}\n\n")
 
                 task_to_send = custom_prompt if analysis_task == "Tanya Bebas (Custom Prompt)" else analysis_task
                 system_prompt = f"Anda adalah Profesor dan Analis Riset Akademik Senior. Lakukan insturksi berikut terhadap batch dokumen ini: {task_to_send}\nATURAN KETAT: 1. Selalu referensikan dokumen dengan 'Judul Asli' miliknya. 2. JANGAN mengubah/menerjemahkan frasa 'Judul Asli'. 3. Keluaran harus menggunakan kaidah Bahasa Indonesia yang tinggi, tertata, dan saintifik."
@@ -1378,10 +1464,15 @@ elif len(st.session_state.history) > 0:
                     analysis_type = st.radio("Model Jaringan Analisis:", ["Kookurensi Kata (Co-word)", "Kolaborasi Penulis (Co-authorship)"])
                     is_author_network = (analysis_type == "Kolaborasi Penulis (Co-authorship)")
                 with col_g2:
-                    default_idx = cleanable_cols_b.index(author_col) if is_author_network and author_col in cleanable_cols_b else 0
-                    net_col = st.selectbox("Entitas Pemetaan (Nodes):", cleanable_cols_b, index=default_idx)
-                    default_delim_idx = 0 if is_author_network else 0
-                    net_delim = st.selectbox("Format Pemisah Internal:", [";", ",", "|", "Tidak Ada"], index=default_delim_idx)
+                    if is_author_network:
+                        default_idx = cleanable_cols_b.index(author_col) if author_col in cleanable_cols_b else 0
+                        net_col = st.selectbox("Entitas Pemetaan (Nodes):", cleanable_cols_b, index=default_idx, key="net_col_author")
+                    else:
+                        kw_candidates = [c for c in cleanable_cols_b if 'keyword' in c.lower() or 'authkey' in c.lower() or 'index' in c.lower()]
+                        default_idx = cleanable_cols_b.index(kw_candidates[0]) if kw_candidates else 0
+                        net_col = st.selectbox("Entitas Pemetaan (Nodes):", cleanable_cols_b, index=default_idx, key="net_col_coword")
+                        
+                    net_delim = st.selectbox("Format Pemisah Internal:", [";", ",", "|", "Tidak Ada"], index=0, key=f"delim_{is_author_network}")
 
                 st.markdown("---")
                 
@@ -1494,86 +1585,90 @@ elif len(st.session_state.history) > 0:
                     ])
                     
                     # ===============================================
-                    # 1. NETWORK MAP RENDERER
+                    # 1. NETWORK MAP RENDERER (INTERAKTIF DENGAN PYVIS)
                     # ===============================================
                     with tab_net:
                         if len(G_final_net.nodes()) == 0:
                             st.warning("Jaringan kosong. Silakan kurangi 'Minimum Number of Edges' atau tambah 'Number of Nodes' pada Pengaturan Network.")
                         else:
-                            st.caption("Visualisasi interaktif graf berdasarkan pengaturan Co-occurrence Network di atas.")
+                            st.caption("Visualisasi interaktif graf berbasis fisika dinamis (Scroll/Drag untuk interaksi).")
                             
                             col_dl1, col_dl2 = st.columns([4, 1])
                             with col_dl2:
                                 gexf_str = generate_gexf_string(G_final_net)
                                 st.download_button(label="📥 Export to Gephi (.gexf)", data=gexf_str, file_name="network_graph.gexf", mime="application/xml")
 
-                            edge_x, edge_y = [], []
-                            for edge in G_final_net.edges():
-                                x0, y0 = pos_net[edge[0]]
-                                x1, y1 = pos_net[edge[1]]
-                                edge_x.extend([x0, x1, None])
-                                edge_y.extend([y0, y1, None])
-
-                            edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.8, color='rgba(200,200,200,0.5)'), hoverinfo='none', mode='lines')
-
-                            node_x, node_y, node_text, node_hover, node_size, node_colors, text_sizes = [], [], [], [], [], [], []
-                            color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
-                            
-                            # LOGIC: NODE COLOR BY YEAR
-                            word_avg_years = {}
-                            if net_color_year == "Yes" and year_col and year_col in df_mapped_net.columns:
-                                word_years = defaultdict(list)
-                                for idx_df, row in df_mapped_net.iterrows():
-                                    try:
-                                        yr = int(row[year_col])
-                                        for w in row[net_col]:
-                                            if w in G_final_net.nodes():
-                                                word_years[w].append(yr)
-                                    except: pass
-                                word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
-                            
-                            # Node mapping
-                            node_to_comm_net = {}
-                            for idx, comm in enumerate(communities_net):
-                                for node in comm: node_to_comm_net[node] = idx
-                            
-                            for node in G_final_net.nodes():
-                                x, y = pos_net[node]
-                                node_x.append(x); node_y.append(y); node_text.append(node)
-                                freq = G_final_net.nodes[node]['freq']
+                            if HAS_PYVIS:
+                                # Rendering interaktif dengan Pyvis
+                                net = Network(height="650px", width="100%", bgcolor="#ffffff", font_color="black", notebook=False)
                                 
-                                if net_color_year == "Yes" and node in word_avg_years:
-                                    avg_y = word_avg_years[node]
-                                    node_colors.append(avg_y)
-                                    node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi: {freq}<br>Rata-rata Tahun: {round(avg_y, 1)}")
-                                else:
-                                    c_idx = node_to_comm_net.get(node, 0)
-                                    node_colors.append(color_palette[c_idx % len(color_palette)])
-                                    node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi Agregat: {freq}<br>Klaster: {c_idx+1}")
+                                color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
+                                
+                                word_avg_years = {}
+                                if net_color_year == "Yes" and year_col and year_col in df_mapped_net.columns:
+                                    word_years = defaultdict(list)
+                                    for idx_df, row in df_mapped_net.iterrows():
+                                        try:
+                                            yr = int(row[year_col])
+                                            for w in row[net_col]:
+                                                if w in G_final_net.nodes():
+                                                    word_years[w].append(yr)
+                                        except: pass
+                                    word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
                                     
-                                node_size.append(min(max(freq * 1.5, 15), 65))
+                                min_y, max_y = 0, 0
+                                if net_color_year == "Yes" and word_avg_years:
+                                    min_y = min(word_avg_years.values()) if word_avg_years else 0
+                                    max_y = max(word_avg_years.values()) if word_avg_years else 0
+                                    cmap = plt.get_cmap('viridis')
+
+                                node_to_comm_net = {}
+                                for idx, comm in enumerate(communities_net):
+                                    for node in comm: node_to_comm_net[node] = idx
+
+                                for node in G_final_net.nodes():
+                                    freq = G_final_net.nodes[node]['freq']
+                                    degree_count = G_final_net.degree(node) # Menghitung total keterhubungan edges node ini
+                                    n_size = min(max(freq * 1.5, 15), 65)
+                                    
+                                    # Styling Text Label dengan Outline Putih agar sangat jelas terbaca
+                                    font_size = min(max(10 + freq * 0.5, 12), 35)
+                                    font_config = {
+                                        'size': font_size,
+                                        'face': 'Arial',
+                                        'strokeWidth': 3,
+                                        'strokeColor': 'rgba(255,255,255,0.9)',
+                                        'color': '#111111'
+                                    }
+                                    
+                                    if net_color_year == "Yes" and node in word_avg_years:
+                                        avg_y = word_avg_years[node]
+                                        norm_val = 0.5 if max_y == min_y else (avg_y - min_y) / (max_y - min_y)
+                                        hex_color = mcolors.to_hex(cmap(norm_val))
+                                        n_title = f"<b>{node}</b><br>Frekuensi: {freq}<br>Keterhubungan (Degree): {degree_count} Node<br>Rata-rata Tahun Publikasi: {round(avg_y, 1)}"
+                                    else:
+                                        c_idx = node_to_comm_net.get(node, 0)
+                                        hex_color = color_palette[c_idx % len(color_palette)]
+                                        n_title = f"<b>{node}</b><br>Frekuensi: {freq}<br>Keterhubungan (Degree): {degree_count} Node<br>Klaster Komunitas: {c_idx+1}"
+                                        
+                                    net.add_node(node, label=node, title=n_title, color=hex_color, size=n_size, font=font_config)
                                 
-                                base_font_size = 10 + math.sqrt(freq) * 2
-                                text_sizes.append(base_font_size)
-
-                            if net_color_year == "Yes" and word_avg_years:
-                                marker_dict = dict(
-                                    color=node_colors, colorscale='Viridis', showscale=True, 
-                                    size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9,
-                                    colorbar=dict(title="Avg. Pub Year")
-                                )
+                                for u, v, d in G_final_net.edges(data=True):
+                                    edge_weight = d.get('weight', 1)
+                                    net.add_edge(u, v, value=edge_weight, title=f"Kekuatan Relasi: {round(edge_weight, 3)}")
+                                    
+                                net.repulsion(node_distance=150, spring_length=200)
+                                
+                                try:
+                                    path = "network_temp.html"
+                                    net.save_graph(path)
+                                    with open(path, 'r', encoding='utf-8') as HtmlFile:
+                                        source_code = HtmlFile.read()
+                                    components.html(source_code, height=670, scrolling=True)
+                                except Exception as e:
+                                    st.error(f"Gagal merender interaktivitas graf Pyvis: {e}")
                             else:
-                                marker_dict = dict(color=node_colors, size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9)
-
-                            node_trace = go.Scatter(
-                                x=node_x, y=node_y, mode='markers+text', text=node_text, textposition="top center", 
-                                hoverinfo='text', hovertext=node_hover, 
-                                marker=marker_dict,
-                                textfont=dict(size=text_sizes, color='black', family='Arial')
-                            )
-
-                            fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title_font_size=16, showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False), plot_bgcolor='white', height=650))
-                            st.plotly_chart(fig_net, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                                st.warning("Modul Pyvis tidak terinstal. Tampilan grafik Plotly kaku dimatikan. Silakan install Pyvis via terminal untuk fitur ini.")
 
                     # ===============================================
                     # 2. THEMATIC MAP
@@ -1909,11 +2004,11 @@ elif len(st.session_state.history) > 0:
                         gc.collect()
 
     # ---------------------------------------------------------
-    # MENU 6: AI CHATBOT (TRUE RAG SEMANTIC SEARCH SYSTEM)
+    # MENU 6: AI CHATBOT (STRICT RAG & MULTI-TEMPLATES)
     # ---------------------------------------------------------
     elif menu_selection == "💬 AI Chatbot (RAG)":
-        st.title("💬 Interactive AI Research Assistant (RAG System)")
-        st.markdown("Sistem *Retrieval-Augmented Generation* tingkat lanjut. Mesin akan menggunakan Cosine Similarity (TF-IDF) untuk memindai ribuan jurnal Anda secara instan dan mencari wawasan terbaik sebelum merespon pertanyaan.")
+        st.title("💬 Interactive AI Research Assistant (Strict RAG)")
+        st.markdown("Asisten AI yang dirancang HANYA menjawab berdasarkan data. Jika pertanyaan Anda tidak ada di dalam jurnal, AI diinstruksikan untuk jujur menolak menjawab untuk mencegah halusinasi data.")
         
         target_rag_col = abstract_col if abstract_col else title_col
         
@@ -1922,21 +2017,114 @@ elif len(st.session_state.history) > 0:
         elif not HAS_SKLEARN:
             st.error("💡 Modul Machine Learning `scikit-learn` mutlak diperlukan untuk pencarian Semantic RAG. Jalankan `pip install scikit-learn`.")
         else:
-            with st.expander("🛠️ Konfigurasi Mesin RAG (Information Retrieval)", expanded=False):
-                st.write(f"Kolom target pencarian Vektor: **{target_rag_col}**")
-                top_k = st.slider("Jumlah Jurnal Relevan yang Disuntikkan ke Memori AI (Top K):", 5, 30, 10)
-                st.caption("Semakin banyak 'K', konteks AI semakin luas, namun berisiko melebihi batas Token API.")
+            with st.spinner("Menyiapkan Korpus Pencarian Global..."):
+                # Buat kolom Search_Text virtual
+                df_search = data.copy()
+                df_search['Search_Text'] = ""
+                if title_col: df_search['Search_Text'] += df_search[title_col].fillna("").astype(str) + " "
+                if abstract_col: df_search['Search_Text'] += df_search[abstract_col].fillna("").astype(str)
+                
+                corpus_texts = df_search['Search_Text'].tolist()
+                titles_list = data[title_col].fillna("Tanpa Judul").astype(str).tolist() if title_col else ["Tanpa Judul"] * len(corpus_texts)
+                years_list = data[year_col].fillna("N/A").astype(str).tolist() if year_col else ["N/A"] * len(corpus_texts)
+                
+                # --- PERBAIKAN: PROFIL GLOBAL DIPERKAYA DENGAN DATA 'OVERVIEW & TRENDS' ---
+                total_rows = len(data)
+                col_names = ", ".join(data.columns)
+                
+                # Ekstrak rentang tahun
+                if year_col:
+                    valid_years = pd.to_numeric(data[year_col], errors='coerce').dropna()
+                    year_info = f"{int(valid_years.min())} hingga {int(valid_years.max())}" if not valid_years.empty else "Tidak diketahui"
+                else:
+                    year_info = "Tidak tersedia"
+                
+                # Ekstrak Top Penulis
+                if author_col:
+                    all_authors = data[author_col].dropna().astype(str).str.split(";").explode().str.strip()
+                    top_authors = ", ".join(all_authors[all_authors != ""].value_counts().head(5).index.tolist())
+                else:
+                    top_authors = "Tidak tersedia"
+                    
+                # Ekstrak Top Jurnal
+                if journal_col:
+                    top_journals = ", ".join(data[journal_col].value_counts().head(5).index.tolist())
+                else:
+                    top_journals = "Tidak tersedia"
+                    
+                # Ekstrak Top Sitasi
+                if citation_col and title_col:
+                    temp_data = data.copy()
+                    temp_data[citation_col] = pd.to_numeric(temp_data[citation_col], errors='coerce').fillna(0).astype(int)
+                    top_cited_df = temp_data.sort_values(by=citation_col, ascending=False).head(5)
+                    top_cited_papers = "\n                ".join([f"- '{row[title_col]}' ({row[citation_col]} sitasi)" for idx, row in top_cited_df.iterrows()])
+                else:
+                    top_cited_papers = "Tidak tersedia"
+
+                global_data_profile = f"""
+                [PROFIL GLOBAL DATASET & STATISTIK]
+                - Total Dokumen/Jurnal di database ini: {total_rows} dokumen.
+                - Rentang Tahun Publikasi: {year_info}
+                - 5 Penulis Paling Produktif: {top_authors}
+                - 5 Jurnal/Penerbit Teratas: {top_journals}
+                - 5 Dokumen dengan Sitasi Tertinggi (High-Impact):
+                {top_cited_papers}
+                """
+
+            with st.expander("⚙️ Pengaturan Sensitivitas Pencarian & Memori", expanded=False):
+                top_k = st.slider("Jumlah Maksimal Jurnal Referensi untuk ditarik (Top K):", 3, 20, 10)
+                
+                col_clear, col_export = st.columns(2)
+                with col_clear:
+                    if st.button("🗑️ Bersihkan Riwayat Percakapan Chatbot", use_container_width=True):
+                        st.session_state.chat_messages = []
+                        st.rerun()
+                with col_export:
+                    if st.session_state.chat_messages:
+                        chat_export = "\n\n".join([f"[{msg['role'].upper()}]\n{msg['content']}" for msg in st.session_state.chat_messages])
+                        st.download_button("📥 Ekspor Transkrip Diskusi (.txt)", data=chat_export, file_name="riwayat_chat_ai.txt", mime="text/plain", use_container_width=True)
+                    else:
+                        st.button("📥 Ekspor Transkrip Diskusi (.txt)", disabled=True, use_container_width=True)
 
             st.markdown("---")
 
+            # Tampilkan riwayat chat di UI
             for message in st.session_state.chat_messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-            if user_chat_input := st.chat_input("Tanyakan sesuatu ke dataset Anda (Contoh: 'Jurnal mana saja yang membahas metode Machine Learning?')"):
+            st.markdown("---")
+            
+            # --- SISTEM PILIHAN GANDA (TEMPLATE PERTANYAAN) ---
+            with st.container(border=True):
+                st.markdown("#### 🎯 Ajukan Pertanyaan ke AI")
+                opsi_template = [
+                    # Ditambahkan dari Dashboard Overview & Trends
+                    "📈 Analisis tren produksi dokumen dari tahun ke tahun berdasarkan dataset ini.",
+                    "✍️ Siapa saja penulis paling produktif dan apa fokus utama penelitian mereka?",
+                    "🏆 Apa saja dokumen atau artikel dengan sitasi tertinggi (high-impact) dan apa kontribusi utamanya?",
+                    "📰 Jurnal atau sumber penerbit apa yang paling mendominasi publikasi di bidang ini?",
+                    # Template Analitik
+                    "📚 Ringkaskan tren dan temuan utama dari literatur di dataset ini.",
+                    "🔬 Apa saja metodologi, pendekatan, atau algoritma yang dominan digunakan?",
+                    "💡 Identifikasi celah penelitian (research gap) yang paling potensial dieksplorasi di masa depan.",
+                    "⏳ Bagaimana evolusi atau pergeseran fokus topik penelitian ini dari waktu ke waktu?",
+                    "🧩 Teori, model, atau kerangka konseptual apa saja yang sering menjadi landasan studi?",
+                    "⚠️ Apa saja batasan penelitian (limitations) yang paling sering disebutkan oleh para penulis?",
+                    "💼 Apa saja implikasi praktis atau rekomendasi yang disarankan dari temuan-temuan ini?"
+                ]
+                
+                pilihan_user = st.radio("Pilih panduan pertanyaan (Pilihan Ganda):", opsi_template)
+                kirim_btn = st.button("🚀 Tanya AI", type="primary", use_container_width=True)
+
+            # Input pengguna (Trigger dari tombol)
+            if kirim_btn:
+                user_chat_input = pilihan_user
+
                 if not AI_API_KEY:
                     st.error(f"⚠️ Operasi diinterupsi. Masukkan {AI_PROVIDER} API Key pada prapengaturan (Settings Sidebar).")
                 else:
+                    # Tambahkan ke riwayat tampilan
                     st.session_state.chat_messages.append({"role": "user", "content": user_chat_input})
                     with st.chat_message("user"):
                         st.markdown(user_chat_input)
@@ -1945,35 +2133,85 @@ elif len(st.session_state.history) > 0:
                         response_placeholder = st.empty()
                         full_chat_response = ""
                         
-                        with st.spinner("Mencari jurnal yang paling relevan (TF-IDF Similarity Search)..."):
-                            corpus = data[target_rag_col].fillna("").astype(str).tolist()
-                            titles = data[title_col].fillna("No Title").astype(str).tolist() if title_col else ["No Title"] * len(corpus)
-                            years = data[year_col].fillna("N/A").astype(str).tolist() if year_col else ["N/A"] * len(corpus)
+                        with st.spinner("🔍 Mesin TF-IDF sedang memindai seluruh dokumen..."):
+                            # Hapus stop_words='english' agar tidak terlalu agresif memotong istilah penting
+                            vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+                            tfidf_matrix = vectorizer.fit_transform(corpus_texts)
                             
-                            vectorizer = TfidfVectorizer(stop_words='english')
-                            tfidf_matrix = vectorizer.fit_transform(corpus)
-                            query_vec = vectorizer.transform([user_chat_input])
+                            # --- MAPPING TEMPLATE KE KATA KUNCI INGGRIS ---
+                            template_keywords = {
+                                opsi_template[0]: "trend year annual production publication volume increase decrease",
+                                opsi_template[1]: "author researcher productive contribute leading focus study",
+                                opsi_template[2]: "citation cited impact highly influential paper document contribution",
+                                opsi_template[3]: "journal publisher source publication outlet conference proceeding",
+                                opsi_template[4]: "trend review overview development main finding conclusion",
+                                opsi_template[5]: "methodology approach algorithm method technique framework model",
+                                opsi_template[6]: "future work research gap limitation challenge open issue",
+                                opsi_template[7]: "evolution history past shift focus review decade trend",
+                                opsi_template[8]: "theory conceptual model framework foundation literature theoretical",
+                                opsi_template[9]: "limitation restrict downside future work scope boundaries constraint",
+                                opsi_template[10]: "practical implication industry policy practice application real world"
+                            }
+                            
+                            search_query = template_keywords[pilihan_user]
+                            active_threshold = 0.0  # Selalu bypass threshold untuk template agar mendapat konteks sampel
+                            
+                            query_vec = vectorizer.transform([search_query])
                             
                             similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
                             top_indices = similarities.argsort()[-top_k:][::-1]
                             
-                            context_string = ""
+                            retrieved_contexts = []
+                            debug_retrieved_info = [] # Untuk transparansi di UI
+                            
                             for idx in top_indices:
-                                if similarities[idx] > 0.01: 
-                                    context_string += f"[{titles[idx]} (Tahun: {years[idx]})]\nIsi Teks: {corpus[idx]}\n\n"
+                                if similarities[idx] >= active_threshold:
+                                    # Batasi max 2000 karakter agar tidak Token Limit Error
+                                    text_lengkap = corpus_texts[idx].strip()
+                                    text_aman = text_lengkap[:2000] + "...(dipotong)" if len(text_lengkap) > 2000 else text_lengkap
+                                    
+                                    ref_item = f"-[Judul Jurnal: {titles_list[idx]}]\n-[Tahun: {years_list[idx]}]\n-[Isi Teks]: {text_aman}\n\n"
+                                    retrieved_contexts.append(ref_item)
+                                    debug_retrieved_info.append(f"**{titles_list[idx]}** (Skor Kemiripan TF-IDF: {similarities[idx]:.3f})")
 
-                            if not context_string.strip():
-                                context_string = "TIDAK ADA DATA JURNAL YANG RELEVAN DENGAN PERTANYAAN INI DI DATABASE."
+                            context_string = "".join(retrieved_contexts)
+                            
+                        # --- UI TRANSPARANSI ---
+                        if debug_retrieved_info:
+                            with st.expander("🔍 Lihat Referensi Jurnal yang Ditemukan Sistem untuk Menjawab Ini:", expanded=False):
+                                st.write("Sistem memberikan jurnal-jurnal ini ke AI sebagai bahan bacaan:")
+                                for info in debug_retrieved_info:
+                                    st.markdown(f"- {info}")
+                        else:
+                            st.warning("⚠️ Sistem tidak menemukan kata kunci yang cocok di dalam abstrak/judul jurnal Anda.")
+                            context_string = "KOSONG. TIDAK ADA JURNAL YANG RELEVAN."
 
-                        with st.spinner("Berpikir & Menulis Jawaban..."):
-                            rag_system_prompt = f"""Anda adalah 'BiblioBot', Asisten Riset Saintifik yang sangat teliti.
-TUGAS UTAMA ANDA: Jawablah pertanyaan user HANYA berdasarkan cuplikan referensi JURNAL RELEVAN di bawah ini.
-ATURAN EMAS: 
-1. Jangan berhalusinasi. Jika tidak ada di teks referensi, katakan "Berdasarkan dataset, tidak ditemukan informasi tersebut."
-2. SELALU SEBUTKAN NAMA JURNAL (di dalam tanda kurung siku []) jika Anda mengutip suatu fakta.
-=== REFERENSI JURNAL RELEVAN (HASIL SEARCH TF-IDF) ===
+                        # --- MEMORI CHAT YANG SINGKAT ---
+                        chat_history_str = ""
+                        if len(st.session_state.chat_messages) > 1:
+                            chat_history_str = "[RIWAYAT PERCAKAPAN KITA SEBELUMNYA]\n"
+                            recent_chats = st.session_state.chat_messages[-5:-1] 
+                            for msg in recent_chats:
+                                role_name = "User" if msg["role"] == "user" else "AI"
+                                chat_history_str += f"{role_name}: {msg['content']}\n"
+
+                        # --- PROMPT STRICT ANTI-HALUSINASI ---
+                        with st.spinner("🤖 AI sedang membaca referensi & menulis jawaban..."):
+                            rag_system_prompt = f"""Anda adalah 'BiblioBot', Asisten Riset Akademik yang bertugas menjawab pertanyaan user berdasarkan dataset yang diunggah.
+                            
+{global_data_profile}
+
+{chat_history_str}
+
+[CUPLIKAN JURNAL HASIL PENCARIAN UNTUK PERTANYAAN TERAKHIR USER]
 {context_string}
-======================
+
+ATURAN MUTLAK (ANTI-HALUSINASI):
+1. Anda HANYA boleh menjawab menggunakan informasi yang ada di dalam [CUPLIKAN JURNAL HASIL PENCARIAN] dan [PROFIL GLOBAL DATASET].
+2. Jika bagian [CUPLIKAN JURNAL] berisi kata "KOSONG" atau informasi yang ditanyakan TIDAK ADA di dalam cuplikan, ANDA WAJIB MENJAWAB: "Maaf, berdasarkan hasil pemindaian sistem ke dalam teks dataset, saya tidak menemukan informasi mengenai hal tersebut."
+3. DILARANG KERAS MENGARANG JAWABAN (HALUSINASI) MENGGUNAKAN PENGETAHUAN LUAR ANDA.
+4. Jika Anda menemukan jawabannya di dalam referensi, selalu kutip dengan menyebutkan Judul Jurnalnya.
+5. Gunakan bahasa Indonesia yang baik, terstruktur (gunakan bullet points jika perlu), dan santai layaknya asisten profesional.
 """
                             if AI_PROVIDER == "Mistral":
                                 for chunk in stream_mistral(rag_system_prompt, user_chat_input, AI_API_KEY, AI_MODEL):
