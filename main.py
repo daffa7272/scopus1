@@ -11,11 +11,12 @@ Versi Enterprise ini dilengkapi dengan:
 - Semantic Information Retrieval (TF-IDF Cosine Similarity)
 - Geo-spatial Choropleth Mapping
 - Advanced Graph Topology (NetworkX)
-- Generative AI Integration (Mistral & Google Gemini)
-- Full Biblioshiny Replication (Three-Fields, Thematic, Trend Topics)
+- Generative AI Integration (Mistral, Gemini)
+- Local Storage Persistence (Penyimpanan API & Konfigurasi)
 =============================================================================
 """
 
+import os
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -27,12 +28,37 @@ import json
 import math
 import logging
 import datetime
+import gc  # FIX: Modul Garbage Collector untuk optimalisasi RAM
 from collections import Counter, defaultdict
 import io
 import xml.etree.ElementTree as ET # Modul GEXF Export
 
 # Konfigurasi Logging Dasar
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# ==============================
+# LOCAL STORAGE (PERSISTENCE) ENGINE
+# ==============================
+SETTINGS_FILE = "biblio_settings.json"
+
+def load_settings():
+    """Membaca pengaturan/API key yang tersimpan di file lokal."""
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Gagal membaca settings: {e}")
+            return {}
+    return {}
+
+def save_settings(settings_dict):
+    """Menyimpan pengaturan/API key ke file lokal."""
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings_dict, f, indent=4)
+    except Exception as e:
+        logging.error(f"Gagal menyimpan settings: {e}")
 
 # ==============================
 # DEPENDENSI & EKSTENSI LANJUTAN
@@ -47,7 +73,7 @@ except ImportError:
 
 try:
     import networkx as nx
-    from networkx.algorithms import community as nx_comm # FIX: Eksplisit import community networkx
+    from networkx.algorithms import community as nx_comm
     import itertools
     import numpy as np
     HAS_NETWORKX = True
@@ -174,13 +200,28 @@ COMMON_STOPWORDS = {
 
 COUNTRY_ISO_MAPPING = {
     "Afghanistan": "AFG", "Albania": "ALB", "Algeria": "DZA", "Andorra": "AND", "Angola": "AGO", 
-    "Antigua and Barbuda": "ATG", "Argentina": "ARG", "Armenia": "ARM", "Australia": "AUS", 
-    "Austria": "AUT", "Azerbaijan": "AZE", "Bahamas": "BHS", "Bahrain": "BHR", "Bangladesh": "BGD", 
-    "Brazil": "BRA", "Canada": "CAN", "China": "CHN", "France": "FRA", "Germany": "DEU", 
-    "India": "IND", "Indonesia": "IDN", "Italy": "ITA", "Japan": "JPN", "Malaysia": "MYS",
-    "Netherlands": "NLD", "Russia": "RUS", "South Korea": "KOR", "Spain": "ESP", 
+    "Argentina": "ARG", "Armenia": "ARM", "Australia": "AUS", "Austria": "AUT", "Azerbaijan": "AZE", 
+    "Bahrain": "BHR", "Bangladesh": "BGD", "Belgium": "BEL", "Brazil": "BRA", "Bulgaria": "BGR", 
+    "Cambodia": "KHM", "Cameroon": "CMR", "Canada": "CAN", "Chile": "CHL", "China": "CHN", 
+    "Colombia": "COL", "Costa Rica": "CRI", "Croatia": "HRV", "Cuba": "CUB", "Cyprus": "CYP", 
+    "Czechia": "CZE", "Denmark": "DNK", "Ecuador": "ECU", "Egypt": "EGY", "Estonia": "EST", 
+    "Ethiopia": "ETH", "Fiji": "FJI", "Finland": "FIN", "France": "FRA", "Georgia": "GEO", 
+    "Germany": "DEU", "Ghana": "GHA", "Greece": "GRC", "Hungary": "HUN", "Iceland": "ISL", 
+    "India": "IND", "Indonesia": "IDN", "Iran": "IRN", "Iraq": "IRQ", "Ireland": "IRL", 
+    "Israel": "ISR", "Italy": "ITA", "Jamaica": "JAM", "Japan": "JPN", "Jordan": "JOR", 
+    "Kazakhstan": "KAZ", "Kenya": "KEN", "Kuwait": "KWT", "Lebanon": "LBN", "Lithuania": "LTU", 
+    "Luxembourg": "LUX", "Madagascar": "MDG", "Malaysia": "MYS", "Mexico": "MEX", "Morocco": "MAR", 
+    "Nepal": "NPL", "Netherlands": "NLD", "New Zealand": "NZL", "Nigeria": "NGA", "Norway": "NOR", 
+    "Oman": "OMN", "Pakistan": "PAK", "Palestine": "PSE", "Peru": "PER", "Philippines": "PHL", 
+    "Poland": "POL", "Portugal": "PRT", "Qatar": "QAT", "Romania": "ROU", "Russia": "RUS", 
+    "Russian Federation": "RUS", "Saudi Arabia": "SAU", "Senegal": "SEN", "Serbia": "SRB", 
+    "Singapore": "SGP", "Slovakia": "SVK", "Slovenia": "SVN", "South Africa": "ZAF", 
+    "South Korea": "KOR", "Spain": "ESP", "Sri Lanka": "LKA", "Sudan": "SDN", "Sweden": "SWE", 
+    "Switzerland": "CHE", "Taiwan": "TWN", "Tanzania": "TZA", "Thailand": "THA", "Tunisia": "TUN", 
+    "Turkey": "TUR", "Uganda": "UGA", "Ukraine": "UKR", "United Arab Emirates": "ARE", "UAE": "ARE", 
     "United Kingdom": "GBR", "UK": "GBR", "England": "GBR", "United States": "USA", "USA": "USA", 
-    "Vietnam": "VNM", "Taiwan": "TWN"
+    "United States of America": "USA", "Uruguay": "URY", "Uzbekistan": "UZB", "Venezuela": "VEN", 
+    "Vietnam": "VNM", "Zambia": "ZMB", "Zimbabwe": "ZWE"
 }
 
 BIBLIOMETRIC_GLOSSARY = {
@@ -234,7 +275,7 @@ def stream_gemini(system_prompt: str, user_prompt: str, api_key: str, model: str
                     except: pass
     except Exception as e: yield f"❌ Terjadi kesalahan internal: {e}"
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
 def call_mistral_sync(system_prompt: str, user_prompt: str, api_key: str, model: str) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}
@@ -244,7 +285,7 @@ def call_mistral_sync(system_prompt: str, user_prompt: str, api_key: str, model:
         else: return f"Error: {response.text}"
     except Exception as e: return f"Error: {e}"
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
 def call_gemini_sync(system_prompt: str, user_prompt: str, api_key: str, model: str) -> str:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
@@ -419,7 +460,6 @@ def filter_edges(G, min_raw_weight=1, min_norm_weight=0.0):
     return G_f
 
 def detect_clusters(G, method="Louvain"):
-    # FIX: Memanfaatkan nx_comm agar tidak memicu AttributeError
     if method == "Louvain" and HAS_LOUVAIN:
         partition = community_louvain.best_partition(G, weight='weight', random_state=42)
         clusters = {}
@@ -566,17 +606,24 @@ def apply_transform(func, action_name, is_row_filter=False, target_col=None):
         new_df = base_df.copy()
         new_df[target_col] = func(new_df[target_col])
         st.session_state.preview_new = new_df[target_col].copy()
-    st.session_state.history = st.session_state.history[:st.session_state.current_step + 1]
-    st.session_state.history_actions = st.session_state.history_actions[:st.session_state.current_step + 1]
+    
+    # Garbage Collection / Trim history for memory
+    st.session_state.history = st.session_state.history[max(0, st.session_state.current_step - 2):st.session_state.current_step + 1]
+    st.session_state.history_actions = st.session_state.history_actions[max(0, st.session_state.current_step - 2):st.session_state.current_step + 1]
+    st.session_state.current_step = len(st.session_state.history) - 1
+    
     st.session_state.history.append(new_df)
     st.session_state.history_actions.append(action_name)
     st.session_state.current_step += 1
     st.session_state.preview_action = action_name
+    gc.collect()
     st.rerun()
 
 # ==============================
 # STRUKTUR ANTARMUKA (SIDEBAR)
 # ==============================
+user_prefs = load_settings()
+
 with st.sidebar:
     st.markdown("<h2 style='text-align: center; color: #4a90e2; font-weight: 800; font-family: sans-serif;'>📚 Biblio Analyzer Pro</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; font-size:12px; margin-top:-15px;'>Enterprise Mapping Edition</p>", unsafe_allow_html=True)
@@ -598,18 +645,44 @@ with st.sidebar:
     
     st.markdown("---")
     with st.expander("⚙️ Settings & API Keys", expanded=False):
-        SCOPUS_API_KEY = st.text_input("Scopus API Key", type="password", placeholder="Masukkan key Scopus").strip()
+        SCOPUS_API_KEY = st.text_input("Scopus API Key", type="password", value=user_prefs.get("scopus_key", ""), placeholder="Masukkan key Scopus").strip()
         st.markdown("**AI Provider**")
-        AI_PROVIDER = st.selectbox("Pilih Penyedia:", ["Mistral", "Google Gemini"], label_visibility="collapsed")
+        
+        providers = ["Mistral", "Google Gemini"]
+        default_prov = user_prefs.get("ai_provider", "Mistral")
+        prov_idx = providers.index(default_prov) if default_prov in providers else 0
+        AI_PROVIDER = st.selectbox("Pilih Penyedia:", providers, index=prov_idx, label_visibility="collapsed")
         
         if AI_PROVIDER == "Mistral":
-            AI_API_KEY = st.text_input("Mistral API Key", type="password", placeholder="Masukkan key Mistral").strip()
-            AI_MODEL = st.selectbox("Model:", ["mistral-small-latest", "open-mistral-nemo", "mistral-large-latest"])
+            AI_API_KEY = st.text_input("Mistral API Key", type="password", value=user_prefs.get("mistral_key", ""), placeholder="Masukkan key Mistral").strip()
+            mistral_models = ["mistral-small-latest", "open-mistral-nemo", "mistral-large-latest"]
+            m_def = user_prefs.get("mistral_model", "mistral-small-latest")
+            m_idx = mistral_models.index(m_def) if m_def in mistral_models else 0
+            AI_MODEL = st.selectbox("Model:", mistral_models, index=m_idx)
             st.caption("✨ 'mistral-small' = Cepat & Hemat Token.")
+            
         elif AI_PROVIDER == "Google Gemini":
-            AI_API_KEY = st.text_input("Gemini API Key", type="password", placeholder="Masukkan key Gemini").strip()
-            AI_MODEL = st.selectbox("Model:", ["gemini-2.5-flash", "gemini-2.5-pro"])
+            AI_API_KEY = st.text_input("Gemini API Key", type="password", value=user_prefs.get("gemini_key", ""), placeholder="Masukkan key Gemini").strip()
+            gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+            g_def = user_prefs.get("gemini_model", "gemini-2.5-flash")
+            g_idx = gemini_models.index(g_def) if g_def in gemini_models else 0
+            AI_MODEL = st.selectbox("Model:", gemini_models, index=g_idx)
             st.caption("✨ 'gemini-2.5-flash' = Sangat kencang.")
+
+        if st.button("💾 Simpan Pengaturan", use_container_width=True):
+            new_settings = user_prefs.copy()
+            new_settings["scopus_key"] = SCOPUS_API_KEY
+            new_settings["ai_provider"] = AI_PROVIDER
+            
+            if AI_PROVIDER == "Mistral":
+                new_settings["mistral_key"] = AI_API_KEY
+                new_settings["mistral_model"] = AI_MODEL
+            elif AI_PROVIDER == "Google Gemini":
+                new_settings["gemini_key"] = AI_API_KEY
+                new_settings["gemini_model"] = AI_MODEL
+                
+            save_settings(new_settings)
+            st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
 
 # ==============================
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
@@ -805,7 +878,6 @@ elif len(st.session_state.history) > 0:
                     if not lotka_df.empty:
                         st.dataframe(lotka_df, use_container_width=True)
                         try:
-                            # Plot distribusi empiris
                             fig_lotka, ax_lotka = plt.subplots(figsize=(6, 3))
                             ax_lotka.plot(pd.to_numeric(lotka_df["Jumlah Dokumen Ditulis"]), lotka_df["Persentase Aktual (%)"], marker='o', color='#e74c3c', label='Aktual')
                             ax_lotka.plot(pd.to_numeric(lotka_df["Jumlah Dokumen Ditulis"]), lotka_df["Prediksi Lotka Teoritis (%)"], linestyle='--', color='gray', label='Lotka Law')
@@ -864,11 +936,10 @@ elif len(st.session_state.history) > 0:
                             docs_lda = data[lda_col].dropna().astype(str)
                             custom_stop = list(COMMON_STOPWORDS) + ['based', 'approach', 'model', 'method', 'data', 'using']
                             
-                            # FIX: Dinamis min_df agar vocabulary tidak kosong jika dokumennya minim
                             min_df_val = 2 if len(docs_lda) > 5 else 1
                             
                             try:
-                                tf_vectorizer = CountVectorizer(max_df=0.95, min_df=min_df_val, stop_words=custom_stop)
+                                tf_vectorizer = CountVectorizer(max_df=0.95, min_df=min_df_val, stop_words=custom_stop, max_features=1500)
                                 tf = tf_vectorizer.fit_transform(docs_lda)
                                 
                                 lda_model = LatentDirichletAllocation(n_components=lda_topics, random_state=42, max_iter=10)
@@ -886,6 +957,8 @@ elif len(st.session_state.history) > 0:
                                         st.info(f"**Topik {topic_idx + 1}**\n\n" + ", ".join([f"`{w}`" for w in top_features]))
                             except ValueError as e:
                                 st.error(f"⚠️ Algoritma LDA gagal: Vocabulary kosong (terlalu banyak stopwords yang terfilter atau jumlah data terlalu sedikit). Detail: {str(e)}")
+                            
+                            gc.collect()
 
     # ---------------------------------------------------------
     # MENU 3: DATA CLEANING (OPENREFINE)
@@ -1148,7 +1221,7 @@ elif len(st.session_state.history) > 0:
                     if st.button("✖️ Tutup Panel Pratinjau"):
                         st.session_state.preview_action = None
                         st.rerun()
-                st.markdown("---")
+                    st.markdown("---")
                 
                 if st.session_state.clustering_result is not None:
                     st.write(f"⚠️ Ditemukan **{len(st.session_state.clustering_result['ID Klaster'].unique())}** grup variasi kata.")
@@ -1276,6 +1349,7 @@ elif len(st.session_state.history) > 0:
                     st.success("✅ Seluruh antrian Batch berhasil dieksekusi secara berurutan.")
                     st.download_button("📥 Ekspor Laporan Skrip (.txt)", data=full_report_text, file_name="laporan_ai_sintesis_full.txt", mime="text/plain", type="primary")
 
+                gc.collect()
 
     # ---------------------------------------------------------
     # MENU 5: CONCEPTUAL STRUCTURE (SCIENCE MAPPING - BIBLIOSHINY)
@@ -1311,522 +1385,528 @@ elif len(st.session_state.history) > 0:
 
                 st.markdown("---")
                 
-                # Membagi Form Konfigurasi Network Map dan Thematic Map Persis Biblioshiny
-                col_set1, col_set2 = st.columns(2)
+                with st.expander("🛠️ Pengaturan Lanjutan (Advanced Parameters - Biblioshiny Style)", expanded=True):
+                    col_set1, col_set2 = st.columns(2)
+                    
+                    with col_set1:
+                        st.markdown("#### 🕸️ Co-occurrence Network Settings")
+                        
+                        st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0;'>Method Parameters</p>", unsafe_allow_html=True)
+                        col_n1, col_n2 = st.columns(2)
+                        net_layout = col_n1.selectbox("Network Layout", ["Automatic layout", "Circle layout", "Kamada-Kawai", "Fruchterman-Reingold"], index=0)
+                        net_algo = col_n2.selectbox("Clustering Algorithm (Network)", ["Louvain", "Betweenness", "InfoMap", "Leading Eigenvector", "Leiden", "Spinglass", "Walktrap"], index=0, key="net_algo")
+                        net_norm = col_n1.selectbox("Normalization Method", ["Association", "Equivalence", "Jaccard", "Salton", "Inclusion", "Raw"], index=0)
+                        net_color_year = col_n2.selectbox("Node Color by Year", ["No", "Yes"], index=0)
+
+                        st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0; margin-top:10px;'>Network Size</p>", unsafe_allow_html=True)
+                        col_n3, col_n4 = st.columns(2)
+                        net_n_nodes = col_n3.number_input("Number of Nodes", 10, 500, 50, step=10, key="net_n_nodes")
+                        net_repulsion = col_n4.number_input("Repulsion Force (Network)", 0.05, 5.0, 0.5, step=0.05, key="net_repulsion")
+
+                        st.markdown("<p style='color:#f39c12; font-weight:bold; margin-bottom:0; margin-top:10px;'>Filtering Options</p>", unsafe_allow_html=True)
+                        col_n5, col_n6 = st.columns(2)
+                        net_remove_isolates = col_n5.selectbox("Remove Isolated Nodes", ["Yes", "No"], index=0)
+                        net_min_edges = col_n6.number_input("Minimum Number of Edges", 1, 20, 2, key="net_min_edges")
+
+                    with col_set2:
+                        st.markdown("#### 📍 Parameters (Thematic Map)")
+                        
+                        st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0;'>Data Parameters</p>", unsafe_allow_html=True)
+                        col_t1, col_t2 = st.columns(2)
+                        theme_n_words = col_t1.number_input("Number of Words", 10, 1000, 250, step=10)
+                        theme_min_freq = col_t2.number_input("Min Cluster Frequency (per thousand docs)", 1, 50, 5)
+
+                        st.markdown("<p style='color:#27ae60; font-weight:bold; margin-bottom:0; margin-top:10px;'>Display Parameters</p>", unsafe_allow_html=True)
+                        col_t3, col_t4 = st.columns(2)
+                        theme_num_labels = col_t3.number_input("Number of Labels", 1, 10, 3)
+                        theme_label_size = col_t4.number_input("Label Size", 0.1, 2.0, 0.3, step=0.1)
+
+                        st.markdown("<p style='color:#e91e63; font-weight:bold; margin-bottom:0; margin-top:10px;'>Network Parameters</p>", unsafe_allow_html=True)
+                        col_t5, col_t6 = st.columns(2)
+                        theme_repulsion = col_t5.number_input("Community Repulsion", 0.05, 5.0, 0.5, step=0.05, key="thm_rep")
+                        theme_algo = col_t6.selectbox("Clustering Algorithm (Thematic)", ["Louvain", "Betweenness", "InfoMap", "Leading Eigenvector", "Leiden", "Spinglass", "Walktrap"], index=0, key="thm_algo")
+
+                btn_map = st.button("🚀 Eksekusi Render Pemetaan (Build Maps)", type="primary", use_container_width=True)
                 
-                with col_set1:
-                    st.markdown("#### ⚙️ Co-occurrence Network Settings")
+                # REAKTIVITAS KODE: MENGGUNAKAN VARIABEL SLIDER SECARA LANGSUNG
+                if btn_map:
+                    st.session_state.map_rendered = True
+
+                if st.session_state.get('map_rendered', False):
+                    actual_net_delim = {";": ";", ",": ",", "|": "|"}.get(net_delim)
                     
-                    st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0;'>Method Parameters</p>", unsafe_allow_html=True)
-                    col_n1, col_n2 = st.columns(2)
-                    net_layout = col_n1.selectbox("Network Layout", ["Automatic layout", "Circle layout", "Kamada-Kawai", "Fruchterman-Reingold"], index=0)
-                    net_algo = col_n2.selectbox("Clustering Algorithm", ["Louvain", "Betweenness", "InfoMap", "Leading Eigenvector", "Leiden", "Spinglass", "Walktrap"], index=0, key="net_algo")
-                    net_norm = col_n1.selectbox("Normalization Method", ["Association", "Equivalence", "Jaccard", "Salton", "Inclusion", "Raw"], index=0)
-                    net_color_year = col_n2.selectbox("Node Color by Year", ["No", "Yes"], index=0)
-
-                    st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0; margin-top:10px;'>Network Size</p>", unsafe_allow_html=True)
-                    col_n3, col_n4 = st.columns(2)
-                    net_n_nodes = col_n3.number_input("Number of Nodes", 10, 500, 50, step=10, key="net_n_nodes")
-                    net_repulsion = col_n4.number_input("Repulsion Force", 0.05, 5.0, 0.5, step=0.05, key="net_repulsion")
-
-                    st.markdown("<p style='color:#f39c12; font-weight:bold; margin-bottom:0; margin-top:10px;'>Filtering Options</p>", unsafe_allow_html=True)
-                    col_n5, col_n6 = st.columns(2)
-                    net_remove_isolates = col_n5.selectbox("Remove Isolated Nodes", ["Yes", "No"], index=0)
-                    net_min_edges = col_n6.number_input("Minimum Number of Edges", 1, 20, 2, key="net_min_edges")
-
-                with col_set2:
-                    st.markdown("#### ⚙️ Parameters (Thematic Map)")
-                    
-                    st.markdown("<p style='color:#2c3e50; font-weight:bold; margin-bottom:0;'>Data Parameters</p>", unsafe_allow_html=True)
-                    col_t1, col_t2 = st.columns(2)
-                    theme_n_words = col_t1.number_input("Number of Words", 10, 1000, 250, step=10)
-                    theme_min_freq = col_t2.number_input("Min Cluster Frequency (per thousand docs)", 1, 50, 5)
-
-                    st.markdown("<p style='color:#27ae60; font-weight:bold; margin-bottom:0; margin-top:10px;'>Display Parameters</p>", unsafe_allow_html=True)
-                    col_t3, col_t4 = st.columns(2)
-                    theme_num_labels = col_t3.number_input("Number of Labels", 1, 10, 3)
-                    theme_label_size = col_t4.number_input("Label Size", 0.1, 2.0, 0.3, step=0.1)
-
-                    st.markdown("<p style='color:#e91e63; font-weight:bold; margin-bottom:0; margin-top:10px;'>Network Parameters</p>", unsafe_allow_html=True)
-                    col_t5, col_t6 = st.columns(2)
-                    theme_repulsion = col_t5.number_input("Community Repulsion", 0.05, 5.0, 0.5, step=0.05, key="thm_rep")
-                    theme_algo = col_t6.selectbox("Clustering Algorithm", ["Louvain", "Betweenness", "InfoMap", "Leading Eigenvector", "Leiden", "Spinglass", "Walktrap"], index=0, key="thm_algo")
-
-                # REAKTIVITAS: Eksekusi Otomatis Berdasarkan Perubahan Parameter
-                actual_net_delim = {";": ";", ",": ",", "|": "|"}.get(net_delim)
-                
-                with st.spinner("Mengeksekusi matriks jarak dan struktur graf secara otomatis..."):
                     # ---------------------------------------------------------
-                    # PIPELINE 1: NETWORK MAP (Co-occurrence)
+                    # 6-STEP PREPROCESSING ENGINE FOR SCIENCE MAPPING
                     # ---------------------------------------------------------
-                    df_mapped = preprocess_keywords(data, field=net_col, delimiter=actual_net_delim, is_author=is_author_network)
-                    
-                    G_raw_net, wc_net = build_cooccurrence(df_mapped, field=net_col, minfreq=1)
-                    top_words_net = [w for w, c in Counter(wc_net).most_common(net_n_nodes)]
-                    G_raw_net = G_raw_net.subgraph(top_words_net).copy()
-
-                    G_norm_net = normalize_network(G_raw_net, method=net_norm)
-                    G_final_net = filter_edges(G_norm_net, min_raw_weight=net_min_edges, min_norm_weight=0.0)
-
-                    if net_remove_isolates == "Yes":
-                        G_final_net.remove_nodes_from(list(nx.isolates(G_final_net)))
-
-                    if len(G_final_net.nodes()) > 0:
-                        communities_net = detect_clusters(G_final_net, method=net_algo)
+                    with st.spinner("Mengeksekusi matriks jarak dan struktur graf secara otomatis..."):
                         
-                        # Layout Mapping
-                        if net_layout == "Circle layout":
-                            pos_net = nx.circular_layout(G_final_net)
-                        elif net_layout == "Kamada-Kawai":
-                            pos_net = nx.kamada_kawai_layout(G_final_net)
-                        else:
-                            pos_net = nx.spring_layout(G_final_net, k=net_repulsion, iterations=150, seed=42)
-                    else:
-                        communities_net = []
-                        pos_net = {}
-
-                    # ---------------------------------------------------------
-                    # PIPELINE 2: THEMATIC MAP
-                    # ---------------------------------------------------------
-                    total_documents = len(df_mapped)
-                    actual_min_freq_theme = max(1, math.ceil((theme_min_freq / 1000) * total_documents))
-
-                    G_raw_theme, wc_theme = build_cooccurrence(df_mapped, field=net_col, minfreq=actual_min_freq_theme)
-                    
-                    top_words_theme = [w for w, c in Counter({w: c for w, c in wc_theme.items() if c >= actual_min_freq_theme}).most_common(theme_n_words)]
-                    G_raw_theme = G_raw_theme.subgraph(top_words_theme).copy()
-                    G_raw_theme.remove_nodes_from(list(nx.isolates(G_raw_theme)))
-
-                    G_norm_theme = normalize_network(G_raw_theme, method="Association") 
-                    G_final_theme = filter_edges(G_norm_theme, min_raw_weight=1, min_norm_weight=0.0)
-
-                    if len(G_final_theme.nodes()) > 0:
-                        communities_theme = detect_clusters(G_final_theme, method=theme_algo)
-                        df_theme = compute_callon_metrics(G_final_theme, communities_theme, wc_theme)
-                    else:
-                        communities_theme = []
-                        df_theme = pd.DataFrame()
-
-                network_title = "🕸️ Co-authorship Network" if is_author_network else "🕸️ Co-occurrence Network"
-                tab_net, tab_map, tab_evol, tab_three, tab_trend, tab_table = st.tabs([
-                    network_title, "📍 Thematic Map", "⏳ Thematic Evolution", 
-                    "🔀 Three-Fields Plot", "📈 Trend Topics", "📊 Network Analytics"
-                ])
-                
-                # ===============================================
-                # 1. NETWORK MAP RENDERER
-                # ===============================================
-                with tab_net:
-                    if len(G_final_net.nodes()) == 0:
-                        st.warning("Jaringan kosong. Silakan kurangi 'Minimum Number of Edges' atau tambah 'Number of Nodes' pada Pengaturan Network.")
-                    else:
-                        st.caption("Visualisasi interaktif graf berdasarkan pengaturan Co-occurrence Network di atas.")
+                        # PIPELINE 1: NETWORK MAP (Co-occurrence)
+                        df_mapped_net = preprocess_keywords(data, field=net_col, delimiter=actual_net_delim, is_author=is_author_network)
                         
-                        col_dl1, col_dl2 = st.columns([4, 1])
-                        with col_dl2:
-                            gexf_str = generate_gexf_string(G_final_net)
-                            st.download_button(label="📥 Export to Gephi (.gexf)", data=gexf_str, file_name="network_graph.gexf", mime="application/xml")
+                        G_raw_net, wc_net = build_cooccurrence(df_mapped_net, field=net_col, minfreq=1)
+                        top_words_net = [w for w, c in Counter(wc_net).most_common(net_n_nodes)]
+                        G_raw_net = G_raw_net.subgraph(top_words_net).copy()
 
-                        edge_x, edge_y = [], []
-                        for edge in G_final_net.edges():
-                            x0, y0 = pos_net[edge[0]]
-                            x1, y1 = pos_net[edge[1]]
-                            edge_x.extend([x0, x1, None])
-                            edge_y.extend([y0, y1, None])
+                        G_norm_net = normalize_network(G_raw_net, method=net_norm)
+                        G_final_net = filter_edges(G_norm_net, min_raw_weight=net_min_edges, min_norm_weight=0.0)
 
-                        edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.8, color='rgba(200,200,200,0.5)'), hoverinfo='none', mode='lines')
+                        if net_remove_isolates == "Yes":
+                            G_final_net.remove_nodes_from(list(nx.isolates(G_final_net)))
 
-                        node_x, node_y, node_text, node_hover, node_size, node_colors, text_sizes = [], [], [], [], [], [], []
-                        color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
-                        
-                        # LOGIC: NODE COLOR BY YEAR
-                        word_avg_years = {}
-                        if net_color_year == "Yes" and year_col and year_col in df_mapped.columns:
-                            word_years = defaultdict(list)
-                            for idx_df, row in df_mapped.iterrows():
-                                try:
-                                    yr = int(row[year_col])
-                                    for w in row[net_col]:
-                                        if w in G_final_net.nodes():
-                                            word_years[w].append(yr)
-                                except: pass
-                            word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
-                        
-                        # Node mapping
-                        node_to_comm_net = {}
-                        for idx, comm in enumerate(communities_net):
-                            for node in comm: node_to_comm_net[node] = idx
-
-                        color_scale_values = []
-                        
-                        for node in G_final_net.nodes():
-                            x, y = pos_net[node]
-                            node_x.append(x); node_y.append(y); node_text.append(node)
-                            freq = G_final_net.nodes[node]['freq']
+                        if len(G_final_net.nodes()) > 0:
+                            communities_net = detect_clusters(G_final_net, method=net_algo)
                             
-                            if net_color_year == "Yes" and node in word_avg_years:
-                                avg_y = word_avg_years[node]
-                                node_colors.append(avg_y)
-                                node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi: {freq}<br>Rata-rata Tahun: {round(avg_y, 1)}")
+                            # Layout Mapping
+                            if net_layout == "Circle layout":
+                                pos_net = nx.circular_layout(G_final_net)
+                            elif net_layout == "Kamada-Kawai":
+                                pos_net = nx.kamada_kawai_layout(G_final_net)
                             else:
-                                c_idx = node_to_comm_net.get(node, 0)
-                                node_colors.append(color_palette[c_idx % len(color_palette)])
-                                node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi Agregat: {freq}<br>Klaster: {c_idx+1}")
-                                
-                            node_size.append(min(max(freq * 1.5, 15), 65))
-                            
-                            base_font_size = 10 + math.sqrt(freq) * 2
-                            text_sizes.append(base_font_size)
-
-                        if net_color_year == "Yes" and word_avg_years:
-                            marker_dict = dict(
-                                color=node_colors, colorscale='Viridis', showscale=True, 
-                                size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9,
-                                colorbar=dict(title="Avg. Pub Year")
-                            )
+                                pos_net = nx.spring_layout(G_final_net, k=net_repulsion, iterations=150, seed=42)
                         else:
-                            marker_dict = dict(color=node_colors, size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9)
+                            communities_net = []
+                            pos_net = {}
 
-                        node_trace = go.Scatter(
-                            x=node_x, y=node_y, mode='markers+text', text=node_text, textposition="top center", 
-                            hoverinfo='text', hovertext=node_hover, 
-                            marker=marker_dict,
-                            textfont=dict(size=text_sizes, color='black', family='Arial')
-                        )
+                        # PIPELINE 2: THEMATIC MAP
+                        total_documents = len(df_mapped_net) # Reuse mapped DF
+                        actual_min_freq_theme = max(1, math.ceil((theme_min_freq / 1000) * total_documents))
 
-                        fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title_font_size=16, showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False), plot_bgcolor='white', height=650))
-                        st.plotly_chart(fig_net, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                        G_raw_theme, wc_theme = build_cooccurrence(df_mapped_net, field=net_col, minfreq=actual_min_freq_theme)
+                        
+                        top_words_theme = [w for w, c in Counter({w: c for w, c in wc_theme.items() if c >= actual_min_freq_theme}).most_common(theme_n_words)]
+                        G_raw_theme = G_raw_theme.subgraph(top_words_theme).copy()
+                        G_raw_theme.remove_nodes_from(list(nx.isolates(G_raw_theme)))
 
-                # ===============================================
-                # 2. THEMATIC MAP
-                # ===============================================
-                with tab_map:
-                    if df_theme.empty:
-                        st.warning("Algoritma tidak dapat mendeduksi tema apa pun. Rasio kata terhadap frekuensi minimum terlalu rendah. Coba kurangi 'Min Cluster Freq' atau tambah 'Number of Words'.")
-                    else:
-                        color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
-                        theme_cluster_words = {} 
-                        for comm in communities_theme:
-                            comm_sorted = sorted(comm, key=lambda x: wc_theme.get(x, 0), reverse=True)
-                            cluster_name = comm_sorted[0].title() 
-                            theme_cluster_words[cluster_name] = {w: wc_theme.get(w, 0) for w in comm_sorted}
+                        G_norm_theme = normalize_network(G_raw_theme, method="Association") 
+                        G_final_theme = filter_edges(G_norm_theme, min_raw_weight=1, min_norm_weight=0.0)
 
-                        df_theme['Label Bubble'] = df_theme['keywords'].apply(lambda kws: "<br>".join(kws[:theme_num_labels]))
-                        df_theme['Anggota Parsial'] = df_theme['keywords'].apply(lambda kws: ", ".join(kws))
-                        
-                        mid_c = df_theme['Centrality'].mean() if not df_theme['Centrality'].empty else 0
-                        mid_d = df_theme['Density'].mean() if not df_theme['Density'].empty else 0
-                        
-                        fig_theme = px.scatter(df_theme, x="Centrality", y="Density", size="Volume Representasi", color="Nama Tema Kunci", hover_name="Nama Tema Kunci", hover_data={"Centrality": True, "Density": True, "Volume Representasi": True, "Label Bubble": False, "Nama Tema Kunci": False}, text="Label Bubble", size_max=85, height=700, color_discrete_sequence=color_palette)
-                        
-                        fig_theme.update_traces(
-                            textposition='middle center', 
-                            textfont=dict(color='#2c3e50', size=theme_label_size * 40, family="Arial"), 
-                            marker=dict(line=dict(width=1, color='DarkSlateGrey'), opacity=0.65)
-                        )
-                        
-                        fig_theme.add_hline(y=mid_d, line_dash="dash", line_color="#333", opacity=0.7)
-                        fig_theme.add_vline(x=mid_c, line_dash="dash", line_color="#333", opacity=0.7)
-                        
-                        fig_theme.add_annotation(x=0.01, y=0.99, xref="paper", yref="paper", text="Niche Themes<br><i style='font-size:10px'>(Perkembangan Spesifik Ekstrem)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="left", yanchor="top", align="left")
-                        fig_theme.add_annotation(x=0.99, y=0.99, xref="paper", yref="paper", text="Motor Themes<br><i style='font-size:10px'>(Utama, Mapan, Tumbuh)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="right", yanchor="top", align="right")
-                        fig_theme.add_annotation(x=0.01, y=0.01, xref="paper", yref="paper", text="Emerging/Declining Themes<br><i style='font-size:10px'>(Baru Muncul / Mati)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="left", yanchor="bottom", align="left")
-                        fig_theme.add_annotation(x=0.99, y=0.01, xref="paper", yref="paper", text="Basic & Transversal Themes<br><i style='font-size:10px'>(Dasar Keilmuan Menyeluruh)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="right", yanchor="bottom", align="right")
+                        if len(G_final_theme.nodes()) > 0:
+                            communities_theme = detect_clusters(G_final_theme, method=theme_algo)
+                            df_theme = compute_callon_metrics(G_final_theme, communities_theme, wc_theme)
+                        else:
+                            communities_theme = []
+                            df_theme = pd.DataFrame()
 
-                        fig_theme.update_layout(plot_bgcolor='white', xaxis_title="Relevance degree (Kekuatan Hubungan Eksternal / Centrality)", yaxis_title="Development degree (Kepadatan Hubungan Internal / Density)", showlegend=False, xaxis=dict(showgrid=False, zeroline=False), yaxis=dict(showgrid=False, zeroline=False), margin=dict(l=20, r=20, t=20, b=20))
-                        
-                        st.plotly_chart(fig_theme, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                        
-                        st.markdown("---")
-                        st.markdown("#### Detail Analisis Komunitas (Drill-down Klaster)")
-                        st.caption("Rincian top distribusi kata yang membentuk masing-masing sentralitas tema di atas.")
-                        
-                        num_clusters = len(df_theme)
-                        cols_per_row = 3
-                        rows = math.ceil(num_clusters / cols_per_row)
-                        
-                        for r in range(rows):
-                            c_cols = st.columns(cols_per_row)
-                            for c in range(cols_per_row):
-                                idx = r * cols_per_row + c
-                                if idx < num_clusters:
-                                    row_data = df_theme.iloc[idx]
-                                    c_name = row_data['Nama Tema Kunci']
-                                    
-                                    top_5_kws = row_data['keywords'][:5]
-                                    kws_freq = [{"Kata": k, "Frekuensi": wc_theme.get(k, 0)} for k in top_5_kws]
-                                    df_c = pd.DataFrame(kws_freq).sort_values('Frekuensi', ascending=True)
-                                    
-                                    fig_bar = px.bar(df_c, x='Frekuensi', y='Kata', orientation='h', title=f"Tema: {c_name}")
-                                    fig_bar.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=250, yaxis_title=None)
-                                    fig_bar.update_traces(marker_color=color_palette[idx % len(color_palette)])
-                                    c_cols[c].plotly_chart(fig_bar, use_container_width=True)
-
-                # ===============================================
-                # 3. THEMATIC EVOLUTION (SANKEY DATA FLOW)
-                # ===============================================
-                with tab_evol:
-                    st.markdown("#### ⏳ Peta Evolusi Aliran Tema (Thematic Evolution Sankey)")
-                    st.caption("Diagram komparasi asimetris untuk memvisualisasikan asal usul peleburan konsep antardua periode spektrum waktu publikasi.")
+                    network_title = "🕸️ Co-authorship Network" if is_author_network else "🕸️ Co-occurrence Network"
+                    tab_net, tab_map, tab_evol, tab_three, tab_trend, tab_table = st.tabs([
+                        network_title, "📍 Thematic Map", "⏳ Thematic Evolution", 
+                        "🔀 Three-Fields Plot", "📈 Trend Topics", "📊 Network Analytics"
+                    ])
                     
-                    if not year_col:
-                        st.warning("Metadata Temporal (Tahun Publikasi) tidak ditemukan. Modul evolusi dinonaktifkan.")
-                    else:
-                        temp_df = data.copy()
-                        temp_df['Year_Num'] = pd.to_numeric(temp_df[year_col], errors='coerce')
-                        temp_df = temp_df.dropna(subset=['Year_Num'])
-                        
-                        if not temp_df.empty:
-                            min_y = int(temp_df['Year_Num'].min())
-                            max_y = int(temp_df['Year_Num'].max())
+                    # ===============================================
+                    # 1. NETWORK MAP RENDERER
+                    # ===============================================
+                    with tab_net:
+                        if len(G_final_net.nodes()) == 0:
+                            st.warning("Jaringan kosong. Silakan kurangi 'Minimum Number of Edges' atau tambah 'Number of Nodes' pada Pengaturan Network.")
+                        else:
+                            st.caption("Visualisasi interaktif graf berdasarkan pengaturan Co-occurrence Network di atas.")
                             
-                            if min_y < max_y:
-                                cut_year = st.slider("Tentukan Garis Limitasi Periode (Cutting Year):", min_y, max_y, (min_y + max_y) // 2)
-                                
-                                def extract_themes_for_period(df_p):
-                                    df_p_mapped = preprocess_keywords(df_p, field=net_col, delimiter=actual_net_delim, is_author=is_author_network)
-                                    G_r, wc = build_cooccurrence(df_p_mapped, field=net_col, minfreq=actual_min_freq_theme)
-                                    if len(G_r.nodes()) == 0: return []
-                                    
-                                    tw = [w for w, c in Counter({w: c for w, c in wc.items() if c >= actual_min_freq_theme}).most_common(theme_n_words)]
-                                    G_r = G_r.subgraph(tw).copy()
-                                    
-                                    G_n = normalize_network(G_r, method="Association")
-                                    G_f = filter_edges(G_n, min_raw_weight=1, min_norm_weight=0.0)
-                                    if len(G_f.nodes()) == 0: return []
-                                    
-                                    comms = detect_clusters(G_f, method=theme_algo)
-                                    
-                                    themes_p = []
-                                    for comm in comms:
-                                        if len(comm) < 2: continue
-                                        c_sorted = sorted(comm, key=lambda x: wc.get(x, 0), reverse=True)
-                                        themes_p.append({"name": c_sorted[0].title(), "words": set(comm)})
-                                    return themes_p
+                            col_dl1, col_dl2 = st.columns([4, 1])
+                            with col_dl2:
+                                gexf_str = generate_gexf_string(G_final_net)
+                                st.download_button(label="📥 Export to Gephi (.gexf)", data=gexf_str, file_name="network_graph.gexf", mime="application/xml")
 
-                                with st.spinner("Mengekstrak tema periode longitudinal..."):
-                                    df_p1 = temp_df[temp_df['Year_Num'] <= cut_year]
-                                    df_p2 = temp_df[temp_df['Year_Num'] > cut_year]
-                                    
-                                    themes_1 = extract_themes_for_period(df_p1)
-                                    themes_2 = extract_themes_for_period(df_p2)
+                            edge_x, edge_y = [], []
+                            for edge in G_final_net.edges():
+                                x0, y0 = pos_net[edge[0]]
+                                x1, y1 = pos_net[edge[1]]
+                                edge_x.extend([x0, x1, None])
+                                edge_y.extend([y0, y1, None])
+
+                            edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.8, color='rgba(200,200,200,0.5)'), hoverinfo='none', mode='lines')
+
+                            node_x, node_y, node_text, node_hover, node_size, node_colors, text_sizes = [], [], [], [], [], [], []
+                            color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
+                            
+                            # LOGIC: NODE COLOR BY YEAR
+                            word_avg_years = {}
+                            if net_color_year == "Yes" and year_col and year_col in df_mapped_net.columns:
+                                word_years = defaultdict(list)
+                                for idx_df, row in df_mapped_net.iterrows():
+                                    try:
+                                        yr = int(row[year_col])
+                                        for w in row[net_col]:
+                                            if w in G_final_net.nodes():
+                                                word_years[w].append(yr)
+                                    except: pass
+                                word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
+                            
+                            # Node mapping
+                            node_to_comm_net = {}
+                            for idx, comm in enumerate(communities_net):
+                                for node in comm: node_to_comm_net[node] = idx
+                            
+                            for node in G_final_net.nodes():
+                                x, y = pos_net[node]
+                                node_x.append(x); node_y.append(y); node_text.append(node)
+                                freq = G_final_net.nodes[node]['freq']
                                 
-                                if not themes_1 or not themes_2:
-                                    st.warning("Data isolasi sub-periode tidak mencukupi untuk menjalankan algoritma klaster Thematic Evolution.")
+                                if net_color_year == "Yes" and node in word_avg_years:
+                                    avg_y = word_avg_years[node]
+                                    node_colors.append(avg_y)
+                                    node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi: {freq}<br>Rata-rata Tahun: {round(avg_y, 1)}")
                                 else:
-                                    labels = [f"{t['name']} (P1)" for t in themes_1] + [f"{t['name']} (P2)" for t in themes_2]
-                                    source_idx, target_idx, vals = [], [], []
-                                    offset = len(themes_1)
+                                    c_idx = node_to_comm_net.get(node, 0)
+                                    node_colors.append(color_palette[c_idx % len(color_palette)])
+                                    node_hover.append(f"Entitas: <b>{node}</b><br>Frekuensi Agregat: {freq}<br>Klaster: {c_idx+1}")
                                     
-                                    for i, t1 in enumerate(themes_1):
-                                        for j, t2 in enumerate(themes_2):
-                                            intersect = t1['words'].intersection(t2['words'])
-                                            if len(intersect) > 0:
-                                                source_idx.append(i)
-                                                target_idx.append(offset + j)
-                                                vals.append(len(intersect))
-                                    
-                                    if len(source_idx) > 0:
-                                        fig_sankey = go.Figure(data=[go.Sankey(
-                                            node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels, color="#4a90e2"),
-                                            link=dict(source=source_idx, target=target_idx, value=vals, color="rgba(74, 144, 226, 0.4)")
-                                        )])
-                                        fig_sankey.update_layout(title_text=f"Evolusi Garis Waktu: Tahun Publikasi ≤{cut_year} ➔ Lebih Besar dari {cut_year}", font_size=12, height=600)
-                                        st.plotly_chart(fig_sankey, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                                    else:
-                                        st.info("Berdasarkan rentang pemotongan waktu ini, tidak ada kata kunci perantara yang menjembatani evolusi antara kedua blok.")
-                            else:
-                                st.info("Deviasi Tahun (Standar Deviasi temporal) bernilai konstan (satu titik tahun).")
+                                node_size.append(min(max(freq * 1.5, 15), 65))
+                                
+                                base_font_size = 10 + math.sqrt(freq) * 2
+                                text_sizes.append(base_font_size)
 
-                # ===============================================
-                # 4. THREE-FIELDS PLOT (SANKEY)
-                # ===============================================
-                with tab_three:
-                    st.markdown("#### 🔀 Three-Fields Plot")
-                    st.caption("Visualisasi komprehensif Penulis (Kiri) ➔ Kata Kunci (Tengah) ➔ Jurnal (Kanan).")
-                    
-                    if not author_col or not journal_col:
-                        st.warning("Metadata Penulis atau Jurnal tidak lengkap dalam dataset.")
-                    else:
-                        try:
-                            N_TOP = 15 
-                            tf_df = data.copy()
+                            if net_color_year == "Yes" and word_avg_years:
+                                marker_dict = dict(
+                                    color=node_colors, colorscale='Viridis', showscale=True, 
+                                    size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9,
+                                    colorbar=dict(title="Avg. Pub Year")
+                                )
+                            else:
+                                marker_dict = dict(color=node_colors, size=node_size, line_width=1, line_color='rgba(255,255,255,0.8)', opacity=0.9)
+
+                            node_trace = go.Scatter(
+                                x=node_x, y=node_y, mode='markers+text', text=node_text, textposition="top center", 
+                                hoverinfo='text', hovertext=node_hover, 
+                                marker=marker_dict,
+                                textfont=dict(size=text_sizes, color='black', family='Arial')
+                            )
+
+                            fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title_font_size=16, showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False), plot_bgcolor='white', height=650))
+                            st.plotly_chart(fig_net, use_container_width=True, config=PLOTLY_DL_CONFIG)
+
+                    # ===============================================
+                    # 2. THEMATIC MAP
+                    # ===============================================
+                    with tab_map:
+                        if df_theme.empty:
+                            st.warning("Algoritma tidak dapat mendeduksi tema apa pun. Rasio kata terhadap frekuensi minimum terlalu rendah. Coba kurangi 'Min Cluster Freq' atau tambah 'Number of Words'.")
+                        else:
+                            color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
+                            theme_cluster_words = {} 
+                            for comm in communities_theme:
+                                comm_sorted = sorted(comm, key=lambda x: wc_theme.get(x, 0), reverse=True)
+                                cluster_name = comm_sorted[0].title() 
+                                theme_cluster_words[cluster_name] = {w: wc_theme.get(w, 0) for w in comm_sorted}
+
+                            df_theme['Label Bubble'] = df_theme['keywords'].apply(lambda kws: "<br>".join(kws[:theme_num_labels]))
+                            df_theme['Anggota Parsial'] = df_theme['keywords'].apply(lambda kws: ", ".join(kws))
                             
-                            auth_list = tf_df[author_col].astype(str).str.split(";")
-                            jour_list = tf_df[journal_col].astype(str)
+                            mid_c = df_theme['Centrality'].mean() if not df_theme['Centrality'].empty else 0
+                            mid_d = df_theme['Density'].mean() if not df_theme['Density'].empty else 0
+                            
+                            fig_theme = px.scatter(df_theme, x="Centrality", y="Density", size="Volume Representasi", color="Nama Tema Kunci", hover_name="Nama Tema Kunci", hover_data={"Centrality": True, "Density": True, "Volume Representasi": True, "Label Bubble": False, "Nama Tema Kunci": False}, text="Label Bubble", size_max=85, height=700, color_discrete_sequence=color_palette)
+                            
+                            fig_theme.update_traces(
+                                textposition='middle center', 
+                                textfont=dict(color='#2c3e50', size=theme_label_size * 40, family="Arial"), 
+                                marker=dict(line=dict(width=1, color='DarkSlateGrey'), opacity=0.65)
+                            )
+                            
+                            fig_theme.add_hline(y=mid_d, line_dash="dash", line_color="#333", opacity=0.7)
+                            fig_theme.add_vline(x=mid_c, line_dash="dash", line_color="#333", opacity=0.7)
+                            
+                            fig_theme.add_annotation(x=0.01, y=0.99, xref="paper", yref="paper", text="Niche Themes<br><i style='font-size:10px'>(Perkembangan Spesifik Ekstrem)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="left", yanchor="top", align="left")
+                            fig_theme.add_annotation(x=0.99, y=0.99, xref="paper", yref="paper", text="Motor Themes<br><i style='font-size:10px'>(Utama, Mapan, Tumbuh)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="right", yanchor="top", align="right")
+                            fig_theme.add_annotation(x=0.01, y=0.01, xref="paper", yref="paper", text="Emerging/Declining Themes<br><i style='font-size:10px'>(Baru Muncul / Mati)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="left", yanchor="bottom", align="left")
+                            fig_theme.add_annotation(x=0.99, y=0.01, xref="paper", yref="paper", text="Basic & Transversal Themes<br><i style='font-size:10px'>(Dasar Keilmuan Menyeluruh)</i>", showarrow=False, font=dict(size=14, color="gray"), xanchor="right", yanchor="bottom", align="right")
+
+                            fig_theme.update_layout(plot_bgcolor='white', xaxis_title="Relevance degree (Kekuatan Hubungan Eksternal / Centrality)", yaxis_title="Development degree (Kepadatan Hubungan Internal / Density)", showlegend=False, xaxis=dict(showgrid=False, zeroline=False), yaxis=dict(showgrid=False, zeroline=False), margin=dict(l=20, r=20, t=20, b=20))
+                            
+                            st.plotly_chart(fig_theme, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                            
+                            st.markdown("---")
+                            st.markdown("#### Detail Analisis Komunitas (Drill-down Klaster)")
+                            st.caption("Rincian top distribusi kata yang membentuk masing-masing sentralitas tema di atas.")
+                            
+                            num_clusters = len(df_theme)
+                            cols_per_row = 3
+                            rows = math.ceil(num_clusters / cols_per_row)
+                            
+                            for r in range(rows):
+                                c_cols = st.columns(cols_per_row)
+                                for c in range(cols_per_row):
+                                    idx = r * cols_per_row + c
+                                    if idx < num_clusters:
+                                        row_data = df_theme.iloc[idx]
+                                        c_name = row_data['Nama Tema Kunci']
+                                        
+                                        top_5_kws = row_data['keywords'][:5]
+                                        kws_freq = [{"Kata": k, "Frekuensi": wc_theme.get(k, 0)} for k in top_5_kws]
+                                        df_c = pd.DataFrame(kws_freq).sort_values('Frekuensi', ascending=True)
+                                        
+                                        fig_bar = px.bar(df_c, x='Frekuensi', y='Kata', orientation='h', title=f"Tema: {c_name}")
+                                        fig_bar.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=250, yaxis_title=None)
+                                        fig_bar.update_traces(marker_color=color_palette[idx % len(color_palette)])
+                                        c_cols[c].plotly_chart(fig_bar, use_container_width=True)
+
+                    # ===============================================
+                    # 3. THEMATIC EVOLUTION (SANKEY DATA FLOW)
+                    # ===============================================
+                    with tab_evol:
+                        st.markdown("#### ⏳ Peta Evolusi Aliran Tema (Thematic Evolution Sankey)")
+                        st.caption("Diagram komparasi asimetris untuk memvisualisasikan asal usul peleburan konsep antardua periode spektrum waktu publikasi.")
+                        
+                        if not year_col:
+                            st.warning("Metadata Temporal (Tahun Publikasi) tidak ditemukan. Modul evolusi dinonaktifkan.")
+                        else:
+                            temp_df = data.copy()
+                            temp_df['Year_Num'] = pd.to_numeric(temp_df[year_col], errors='coerce')
+                            temp_df = temp_df.dropna(subset=['Year_Num'])
+                            
+                            if not temp_df.empty:
+                                min_y = int(temp_df['Year_Num'].min())
+                                max_y = int(temp_df['Year_Num'].max())
+                                
+                                if min_y < max_y:
+                                    cut_year = st.slider("Tentukan Garis Limitasi Periode (Cutting Year):", min_y, max_y, (min_y + max_y) // 2)
+                                    
+                                    def extract_themes_for_period(df_p):
+                                        df_p_mapped = preprocess_keywords(df_p, field=net_col, delimiter=actual_net_delim, is_author=is_author_network)
+                                        G_r, wc = build_cooccurrence(df_p_mapped, field=net_col, minfreq=actual_min_freq_theme)
+                                        if len(G_r.nodes()) == 0: return []
+                                        
+                                        tw = [w for w, c in Counter({w: c for w, c in wc.items() if c >= actual_min_freq_theme}).most_common(theme_n_words)]
+                                        G_r = G_r.subgraph(tw).copy()
+                                        
+                                        G_n = normalize_network(G_r, method="Association")
+                                        G_f = filter_edges(G_n, min_raw_weight=1, min_norm_weight=0.0)
+                                        if len(G_f.nodes()) == 0: return []
+                                        
+                                        comms = detect_clusters(G_f, method=theme_algo)
+                                        
+                                        themes_p = []
+                                        for comm in comms:
+                                            if len(comm) < 2: continue
+                                            c_sorted = sorted(comm, key=lambda x: wc.get(x, 0), reverse=True)
+                                            themes_p.append({"name": c_sorted[0].title(), "words": set(comm)})
+                                        return themes_p
+
+                                    with st.spinner("Mengekstrak tema periode longitudinal..."):
+                                        df_p1 = temp_df[temp_df['Year_Num'] <= cut_year]
+                                        df_p2 = temp_df[temp_df['Year_Num'] > cut_year]
+                                        
+                                        themes_1 = extract_themes_for_period(df_p1)
+                                        themes_2 = extract_themes_for_period(df_p2)
+                                    
+                                    if not themes_1 or not themes_2:
+                                        st.warning("Data isolasi sub-periode tidak mencukupi untuk menjalankan algoritma klaster Thematic Evolution.")
+                                    else:
+                                        labels = [f"{t['name']} (P1)" for t in themes_1] + [f"{t['name']} (P2)" for t in themes_2]
+                                        source_idx, target_idx, vals = [], [], []
+                                        offset = len(themes_1)
+                                        
+                                        for i, t1 in enumerate(themes_1):
+                                            for j, t2 in enumerate(themes_2):
+                                                intersect = t1['words'].intersection(t2['words'])
+                                                if len(intersect) > 0:
+                                                    source_idx.append(i)
+                                                    target_idx.append(offset + j)
+                                                    vals.append(len(intersect))
+                                        
+                                        if len(source_idx) > 0:
+                                            fig_sankey = go.Figure(data=[go.Sankey(
+                                                node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels, color="#4a90e2"),
+                                                link=dict(source=source_idx, target=target_idx, value=vals, color="rgba(74, 144, 226, 0.4)")
+                                            )])
+                                            fig_sankey.update_layout(title_text=f"Evolusi Garis Waktu: Tahun Publikasi ≤{cut_year} ➔ Lebih Besar dari {cut_year}", font_size=12, height=600)
+                                            st.plotly_chart(fig_sankey, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                                        else:
+                                            st.info("Berdasarkan rentang pemotongan waktu ini, tidak ada kata kunci perantara yang menjembatani evolusi antara kedua blok.")
+                                else:
+                                    st.info("Deviasi Tahun (Standar Deviasi temporal) bernilai konstan (satu titik tahun).")
+
+                    # ===============================================
+                    # 4. THREE-FIELDS PLOT (SANKEY)
+                    # ===============================================
+                    with tab_three:
+                        st.markdown("#### 🔀 Three-Fields Plot")
+                        st.caption("Visualisasi komprehensif Penulis (Kiri) ➔ Kata Kunci (Tengah) ➔ Jurnal (Kanan).")
+                        
+                        if not author_col or not journal_col:
+                            st.warning("Metadata Penulis atau Jurnal tidak lengkap dalam dataset.")
+                        else:
+                            try:
+                                N_TOP = 15 
+                                tf_df = data.copy()
+                                
+                                auth_list = tf_df[author_col].astype(str).str.split(";")
+                                jour_list = tf_df[journal_col].astype(str)
+                                
+                                if actual_net_delim:
+                                    key_list = tf_df[net_col].astype(str).str.lower().str.split(actual_net_delim)
+                                else:
+                                    key_list = tf_df[net_col].astype(str).str.lower().apply(lambda x: [x])
+                                
+                                all_a = [a.strip() for sublist in auth_list.dropna() for a in sublist if a.strip()]
+                                top_a = [x[0] for x in Counter(all_a).most_common(N_TOP)]
+                                
+                                all_j = [j.strip() for j in jour_list.dropna() if j.strip()]
+                                top_j = [x[0] for x in Counter(all_j).most_common(N_TOP)]
+                                
+                                all_k = [k.strip() for sublist in key_list.dropna() for k in sublist if k.strip() and k.strip() not in COMMON_STOPWORDS and k.strip() not in ["tidak tersedia", "n/a", "no title"]]
+                                top_k = [x[0] for x in Counter(all_k).most_common(N_TOP)]
+                                
+                                labels = top_a + top_k + top_j
+                                
+                                link_counts_ak = defaultdict(int)
+                                link_counts_kj = defaultdict(int)
+                                
+                                for i in range(len(tf_df)):
+                                    a_s = [a.strip() for a in auth_list.iloc[i] if a.strip() in top_a] if isinstance(auth_list.iloc[i], list) else []
+                                    k_s = [k.strip() for k in key_list.iloc[i] if k.strip() in top_k] if isinstance(key_list.iloc[i], list) else []
+                                    j_val = jour_list.iloc[i].strip()
+                                    j_s = [j_val] if j_val in top_j else []
+                                    
+                                    for a in a_s:
+                                        for k in k_s:
+                                            link_counts_ak[(a, k)] += 1
+                                    
+                                    for k in k_s:
+                                        for j in j_s:
+                                            link_counts_kj[(k, j)] += 1
+                                
+                                source_idx = []
+                                target_idx = []
+                                vals = []
+                                
+                                for (a, k), v in link_counts_ak.items():
+                                    source_idx.append(labels.index(a))
+                                    target_idx.append(labels.index(k))
+                                    vals.append(v)
+                                    
+                                for (k, j), v in link_counts_kj.items():
+                                    source_idx.append(labels.index(k))
+                                    target_idx.append(labels.index(j))
+                                    vals.append(v)
+                                    
+                                fig_three = go.Figure(data=[go.Sankey(
+                                    node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels, color="#2ecc71"),
+                                    link=dict(source=source_idx, target=target_idx, value=vals, color="rgba(46, 204, 113, 0.4)")
+                                )])
+                                
+                                fig_three.update_layout(title_text="Authors ➔ Keywords ➔ Journals", font_size=11, height=750)
+                                st.plotly_chart(fig_three, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                                
+                            except Exception as e:
+                                st.error(f"Gagal memproses matriks 3 dimensi: {e}")
+
+                    # ===============================================
+                    # 5. TREND TOPICS (WORD DYNAMICS)
+                    # ===============================================
+                    with tab_trend:
+                        st.markdown("#### 📈 Dinamika Topik Tren (Trend Topics)")
+                        st.caption("Peta persebaran frekuensi kata kunci spesifik di sepanjang rentang waktu (tahun publikasi).")
+                        
+                        if not year_col:
+                            st.warning("Metadata Tahun Publikasi tidak ditemukan.")
+                        else:
+                            temp_trend = data[[year_col, net_col]].copy()
+                            temp_trend[year_col] = pd.to_numeric(temp_trend[year_col], errors='coerce')
+                            temp_trend = temp_trend.dropna()
                             
                             if actual_net_delim:
-                                key_list = tf_df[net_col].astype(str).str.lower().str.split(actual_net_delim)
+                                temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().str.split(actual_net_delim)
                             else:
-                                key_list = tf_df[net_col].astype(str).str.lower().apply(lambda x: [x])
+                                temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().apply(lambda x: [x])
                             
-                            all_a = [a.strip() for sublist in auth_list.dropna() for a in sublist if a.strip()]
-                            top_a = [x[0] for x in Counter(all_a).most_common(N_TOP)]
+                            temp_trend = temp_trend.explode('Words')
+                            temp_trend['Words'] = temp_trend['Words'].str.strip()
                             
-                            all_j = [j.strip() for j in jour_list.dropna() if j.strip()]
-                            top_j = [x[0] for x in Counter(all_j).most_common(N_TOP)]
+                            valid_mask = (temp_trend['Words'] != "") & (~temp_trend['Words'].isin(COMMON_STOPWORDS)) & (temp_trend['Words'].str.len() > 3) & (~temp_trend['Words'].isin(["tidak tersedia", "n/a", "no title"]))
+                            temp_trend = temp_trend[valid_mask]
                             
-                            all_k = [k.strip() for sublist in key_list.dropna() for k in sublist if k.strip() and k.strip() not in COMMON_STOPWORDS and k.strip() not in ["tidak tersedia", "n/a", "no title"]]
-                            top_k = [x[0] for x in Counter(all_k).most_common(N_TOP)]
+                            top_trend_words = temp_trend['Words'].value_counts().head(15).index.tolist()
+                            temp_trend = temp_trend[temp_trend['Words'].isin(top_trend_words)]
                             
-                            labels = top_a + top_k + top_j
+                            trend_grouped = temp_trend.groupby([year_col, 'Words']).size().reset_index(name='Frequency')
                             
-                            link_counts_ak = defaultdict(int)
-                            link_counts_kj = defaultdict(int)
-                            
-                            for i in range(len(tf_df)):
-                                a_s = [a.strip() for a in auth_list.iloc[i] if a.strip() in top_a] if isinstance(auth_list.iloc[i], list) else []
-                                k_s = [k.strip() for k in key_list.iloc[i] if k.strip() in top_k] if isinstance(key_list.iloc[i], list) else []
-                                j_val = jour_list.iloc[i].strip()
-                                j_s = [j_val] if j_val in top_j else []
+                            if not trend_grouped.empty:
+                                fig_trend = px.scatter(trend_grouped, x=year_col, y="Words", size="Frequency", color="Words",
+                                                     title="Rentang Hidup dan Puncak Topik Riset",
+                                                     labels={year_col: "Tahun Publikasi", "Words": "Kata Kunci Dominan"},
+                                                     size_max=35, height=650)
                                 
-                                for a in a_s:
-                                    for k in k_s:
-                                        link_counts_ak[(a, k)] += 1
+                                fig_trend.update_layout(xaxis=dict(tickformat="d"), showlegend=False)
+                                for w in top_trend_words:
+                                    fig_trend.add_hline(y=w, line_width=0.5, line_color="lightgray", opacity=0.5)
+                                    
+                                st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                            else:
+                                st.info("Data dinamis tidak mencukupi untuk pemplotan waktu.")
+
+                    # ===============================================
+                    # 6. TABLES AND NODE CENTRALITY METRICS
+                    # ===============================================
+                    with tab_table:
+                        st.markdown("#### Tabel Agregat Modularity")
+                        st.caption("Tabulasi ringkasan klaster hasil kalkulasi Peta Tematik.")
+                        if not df_theme.empty:
+                            df_metrics = df_theme.drop(columns=["Label Bubble", "keywords"])
+                            st.dataframe(df_metrics, use_container_width=True)
+                        else:
+                            st.info("Matriks nol. Operasi komputasi kosong.")
+                            
+                        st.markdown("---")
+                        st.markdown("#### Matriks Lanjutan (Edge List & Adjacency)")
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            try:
+                                adj_df = nx.to_pandas_adjacency(G_final_net)
+                                st.download_button(
+                                    label="📥 Ekspor Adjacency Matrix (.csv)",
+                                    data=convert_df_to_csv(adj_df.reset_index()),
+                                    file_name="adjacency_matrix.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+                            except Exception: pass
+                        with col_dl2:
+                            try:
+                                edge_df = nx.to_pandas_edgelist(G_final_net)
+                                st.download_button(
+                                    label="📥 Ekspor Edge List (.csv)",
+                                    data=convert_df_to_csv(edge_df),
+                                    file_name="edge_list.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+                            except Exception: pass
+
+                        st.markdown("---")
+                        st.markdown("#### Tabel Kedudukan Simpul Tunggal (Node Statistics)")
+                        st.caption("Peringkat pergerakan, kendali, dan pengaruh masing-masing entitas individu dalam keseluruhan ekosistem (Sangat penting bagi ko-kolaborasi).")
+                        try:
+                            # Centrality Computations (Network)
+                            deg_cent = nx.degree_centrality(G_final_net)
+                            with st.spinner("Memuat metrik sentralitas individu..."):
+                                bet_cent = nx.betweenness_centrality(G_final_net)
+                                clo_cent = nx.closeness_centrality(G_final_net)
+                                pr = nx.pagerank(G_final_net, weight='weight')
                                 
-                                for k in k_s:
-                                    for j in j_s:
-                                        link_counts_kj[(k, j)] += 1
-                            
-                            source_idx = []
-                            target_idx = []
-                            vals = []
-                            
-                            for (a, k), v in link_counts_ak.items():
-                                source_idx.append(labels.index(a))
-                                target_idx.append(labels.index(k))
-                                vals.append(v)
+                                node_metrics = []
+                                for node in G_final_net.nodes():
+                                    node_metrics.append({
+                                        "Entitas (Node)": node,
+                                        "Frekuensi Absolut": G_final_net.nodes[node].get('freq', 0),
+                                        "Degree (Relasi Langsung)": round(deg_cent[node], 4),
+                                        "Betweenness (Kontrol)": round(bet_cent[node], 4),
+                                        "Closeness (Akses)": round(clo_cent[node], 4),
+                                        "PageRank (Pengaruh Global)": round(pr[node], 4)
+                                    })
+                                df_nodes = pd.DataFrame(node_metrics).sort_values("PageRank (Pengaruh Global)", ascending=False)
+                                st.dataframe(df_nodes, use_container_width=True, height=350)
                                 
-                            for (k, j), v in link_counts_kj.items():
-                                source_idx.append(labels.index(k))
-                                target_idx.append(labels.index(j))
-                                vals.append(v)
-                                
-                            fig_three = go.Figure(data=[go.Sankey(
-                                node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels, color="#2ecc71"),
-                                link=dict(source=source_idx, target=target_idx, value=vals, color="rgba(46, 204, 113, 0.4)")
-                            )])
-                            
-                            fig_three.update_layout(title_text="Authors ➔ Keywords ➔ Journals", font_size=11, height=750)
-                            st.plotly_chart(fig_three, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                            
+                                st.download_button(
+                                    label="📥 Ekspor Laporan Node (.csv)",
+                                    data=convert_df_to_csv(df_nodes),
+                                    file_name="individual_node_metrics.csv",
+                                    mime="text/csv",
+                                )
                         except Exception as e:
-                            st.error(f"Gagal memproses matriks 3 dimensi: {e}")
-
-                # ===============================================
-                # 5. TREND TOPICS (WORD DYNAMICS)
-                # ===============================================
-                with tab_trend:
-                    st.markdown("#### 📈 Dinamika Topik Tren (Trend Topics)")
-                    st.caption("Peta persebaran frekuensi kata kunci spesifik di sepanjang rentang waktu (tahun publikasi).")
-                    
-                    if not year_col:
-                        st.warning("Metadata Tahun Publikasi tidak ditemukan.")
-                    else:
-                        temp_trend = data[[year_col, net_col]].copy()
-                        temp_trend[year_col] = pd.to_numeric(temp_trend[year_col], errors='coerce')
-                        temp_trend = temp_trend.dropna()
+                            st.warning("Sub-jaringan tidak kompatibel untuk pemeringkatan matriks terpusat.")
                         
-                        if actual_net_delim:
-                            temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().str.split(actual_net_delim)
-                        else:
-                            temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().apply(lambda x: [x])
-                        
-                        temp_trend = temp_trend.explode('Words')
-                        temp_trend['Words'] = temp_trend['Words'].str.strip()
-                        
-                        valid_mask = (temp_trend['Words'] != "") & (~temp_trend['Words'].isin(COMMON_STOPWORDS)) & (temp_trend['Words'].str.len() > 3) & (~temp_trend['Words'].isin(["tidak tersedia", "n/a", "no title"]))
-                        temp_trend = temp_trend[valid_mask]
-                        
-                        top_trend_words = temp_trend['Words'].value_counts().head(15).index.tolist()
-                        temp_trend = temp_trend[temp_trend['Words'].isin(top_trend_words)]
-                        
-                        trend_grouped = temp_trend.groupby([year_col, 'Words']).size().reset_index(name='Frequency')
-                        
-                        if not trend_grouped.empty:
-                            fig_trend = px.scatter(trend_grouped, x=year_col, y="Words", size="Frequency", color="Words",
-                                                 title="Rentang Hidup dan Puncak Topik Riset",
-                                                 labels={year_col: "Tahun Publikasi", "Words": "Kata Kunci Dominan"},
-                                                 size_max=35, height=650)
-                            
-                            fig_trend.update_layout(xaxis=dict(tickformat="d"), showlegend=False)
-                            for w in top_trend_words:
-                                fig_trend.add_hline(y=w, line_width=0.5, line_color="lightgray", opacity=0.5)
-                                
-                            st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                        else:
-                            st.info("Data dinamis tidak mencukupi untuk pemplotan waktu.")
-
-                # ===============================================
-                # 6. TABLES AND NODE CENTRALITY METRICS
-                # ===============================================
-                with tab_table:
-                    st.markdown("#### Tabel Agregat Modularity")
-                    st.caption("Tabulasi ringkasan klaster hasil kalkulasi Peta Tematik.")
-                    if not df_theme.empty:
-                        df_metrics = df_theme.drop(columns=["Label Bubble", "keywords"])
-                        st.dataframe(df_metrics, use_container_width=True)
-                    else:
-                        st.info("Matriks nol. Operasi komputasi kosong.")
-                        
-                    st.markdown("---")
-                    st.markdown("#### Matriks Lanjutan (Edge List & Adjacency)")
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        try:
-                            adj_df = nx.to_pandas_adjacency(G_final_net)
-                            st.download_button(
-                                label="📥 Ekspor Adjacency Matrix (.csv)",
-                                data=convert_df_to_csv(adj_df.reset_index()),
-                                file_name="adjacency_matrix.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
-                        except Exception: pass
-                    with col_dl2:
-                        try:
-                            edge_df = nx.to_pandas_edgelist(G_final_net)
-                            st.download_button(
-                                label="📥 Ekspor Edge List (.csv)",
-                                data=convert_df_to_csv(edge_df),
-                                file_name="edge_list.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
-                        except Exception: pass
-
-                    st.markdown("---")
-                    st.markdown("#### Tabel Kedudukan Simpul Tunggal (Node Statistics)")
-                    st.caption("Peringkat pergerakan, kendali, dan pengaruh masing-masing entitas individu dalam keseluruhan ekosistem (Sangat penting bagi ko-kolaborasi).")
-                    try:
-                        # Centrality Computations (Network)
-                        deg_cent = nx.degree_centrality(G_final_net)
-                        with st.spinner("Memuat metrik sentralitas individu..."):
-                            bet_cent = nx.betweenness_centrality(G_final_net)
-                            clo_cent = nx.closeness_centrality(G_final_net)
-                            pr = nx.pagerank(G_final_net, weight='weight')
-                            
-                            node_metrics = []
-                            for node in G_final_net.nodes():
-                                node_metrics.append({
-                                    "Entitas (Node)": node,
-                                    "Frekuensi Absolut": G_final_net.nodes[node].get('freq', 0),
-                                    "Degree (Relasi Langsung)": round(deg_cent[node], 4),
-                                    "Betweenness (Kontrol)": round(bet_cent[node], 4),
-                                    "Closeness (Akses)": round(clo_cent[node], 4),
-                                    "PageRank (Pengaruh Global)": round(pr[node], 4)
-                                })
-                            df_nodes = pd.DataFrame(node_metrics).sort_values("PageRank (Pengaruh Global)", ascending=False)
-                            st.dataframe(df_nodes, use_container_width=True, height=350)
-                            
-                            st.download_button(
-                                label="📥 Ekspor Laporan Node (.csv)",
-                                data=convert_df_to_csv(df_nodes),
-                                file_name="individual_node_metrics.csv",
-                                mime="text/csv",
-                            )
-                    except Exception as e:
-                        st.warning("Sub-jaringan tidak kompatibel untuk pemeringkatan matriks terpusat.")
+                        gc.collect()
 
     # ---------------------------------------------------------
     # MENU 6: AI CHATBOT (TRUE RAG SEMANTIC SEARCH SYSTEM)
