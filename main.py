@@ -1,3 +1,21 @@
+"""
+=============================================================================
+SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
+=============================================================================
+Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
+dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
+
+Versi Enterprise ini dilengkapi dengan:
+- Natural Language Processing (NLP)
+- Machine Learning Topic Modeling (LDA)
+- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
+- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
+- Advanced Graph Topology (NetworkX & Pyvis)
+- Generative AI Integration (Mistral, Gemini)
+- Local Storage Persistence (Penyimpanan API & Konfigurasi)
+=============================================================================
+"""
+
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -10,6 +28,7 @@ import json
 import math
 import logging
 import datetime
+import tempfile # Modul untuk file HTML sementara yang aman bagi Cloud
 import gc  # Modul Garbage Collector untuk optimalisasi RAM
 from collections import Counter, defaultdict
 import io
@@ -160,7 +179,7 @@ st.markdown("""
         background-color: #4a90e2;
         color: white;
     }
-            /* Tab tidak aktif */
+    /* Tab tidak aktif */
 .stTabs [data-baseweb="tab"] {
     height: 50px;
     white-space: pre-wrap;
@@ -468,19 +487,17 @@ def calculate_lotkas_law(df: pd.DataFrame, author_col: str) -> pd.DataFrame:
 
 # ===============================================
 # TRUE BIBLIOMETRIX ENGINE (EXACT MATCH FORMULAS)
-# CACHED TO OPTIMIZE RE-RENDERS
 # ===============================================
 
 def preprocess_keywords(df, field="ID", delimiter=";", is_author=False):
     df_clean = df.copy()
     def process(x):
-        if pd.isna(x): return tuple() # Changed to tuple for caching hashability
+        if pd.isna(x): return tuple() 
         words = [k.strip().title() if is_author else k.strip().lower() for k in str(x).split(delimiter)]
         return tuple([w for w in words if w and w.lower() not in COMMON_STOPWORDS and w.lower() not in ["tidak tersedia", "n/a", "no title"]])
     df_clean[field] = df_clean[field].apply(process)
     return df_clean
 
-@st.cache_resource(show_spinner=False)
 def build_cooccurrence(df, field="ID", minfreq=5):
     word_counts = Counter()
     for kws in df[field]:
@@ -502,16 +519,15 @@ def build_cooccurrence(df, field="ID", minfreq=5):
                 G.add_edge(w1, w2, weight=1)
     return G, word_counts
 
-@st.cache_resource(show_spinner=False)
-def normalize_network(_G, method="Equivalence"):
+def normalize_network(G, method="Equivalence"):
     G_norm = nx.Graph()
-    for node, data in _G.nodes(data=True):
+    for node, data in G.nodes(data=True):
         G_norm.add_node(node, **data)
 
-    for u, v, data in _G.edges(data=True):
+    for u, v, data in G.edges(data=True):
         c_ij = data['weight']
-        c_i = _G.nodes[u]['freq']
-        c_j = _G.nodes[v]['freq']
+        c_i = G.nodes[u]['freq']
+        c_j = G.nodes[v]['freq']
         
         if method == "Association":
             weight = c_ij / (c_i * c_j) if (c_i * c_j) > 0 else 0
@@ -530,13 +546,12 @@ def normalize_network(_G, method="Equivalence"):
             G_norm.add_edge(u, v, weight=weight, raw_weight=c_ij)
     return G_norm
 
-@st.cache_resource(show_spinner=False)
-def filter_edges(_G, min_raw_weight=1, min_norm_weight=0.0):
+def filter_edges(G, min_raw_weight=1, min_norm_weight=0.0):
     G_f = nx.Graph()
-    for node, data in _G.nodes(data=True):
+    for node, data in G.nodes(data=True):
         G_f.add_node(node, **data)
 
-    for u, v, data in _G.edges(data=True):
+    for u, v, data in G.edges(data=True):
         raw_w = data.get('raw_weight', data.get('weight', 1))
         norm_w = data.get('weight', 0)
         
@@ -544,31 +559,30 @@ def filter_edges(_G, min_raw_weight=1, min_norm_weight=0.0):
             G_f.add_edge(u, v, **data)
     return G_f
 
-@st.cache_resource(show_spinner=False)
-def detect_clusters(_G, method="Louvain"):
+def detect_clusters(G, method="Louvain"):
     if method == "Louvain" and HAS_LOUVAIN:
-        partition = community_louvain.best_partition(_G, weight='weight', random_state=42)
+        partition = community_louvain.best_partition(G, weight='weight', random_state=42)
         clusters = {}
         for node, cid in partition.items():
             clusters.setdefault(cid, []).append(node)
         comms = list(clusters.values())
     elif method == "Betweenness":
         try:
-            comms = next(nx_comm.girvan_newman(_G))
+            comms = next(nx_comm.girvan_newman(G))
         except:
-            comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
+            comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
     elif method in ["InfoMap", "Walktrap", "Spinglass", "Leiden", "Leading Eigenvector"]:
         if method == "InfoMap":
-            comms = list(nx_comm.label_propagation_communities(_G))
+            comms = list(nx_comm.label_propagation_communities(G))
         else:
-            comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
+            comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
     else:
-        comms = [list(c) for c in nx_comm.greedy_modularity_communities(_G, weight='weight')]
+        comms = [list(c) for c in nx_comm.greedy_modularity_communities(G, weight='weight')]
         
     comms = sorted([list(c) for c in comms], key=lambda c: (-len(c), sorted(c)[0]))
     return comms
 
-def compute_callon_metrics(_G, communities, word_counts):
+def compute_callon_metrics(G, communities, word_counts):
     theme_data = []
     for i, comm in enumerate(communities):
         if len(comm) < 2: continue
@@ -576,12 +590,12 @@ def compute_callon_metrics(_G, communities, word_counts):
         comm_sorted = sorted(comm, key=lambda x: word_counts.get(x, 0), reverse=True)
         cluster_name = comm_sorted[0].title()
 
-        subgraph = _G.subgraph(comm)
+        subgraph = G.subgraph(comm)
         internal_weight = subgraph.size(weight='weight')
         n = len(comm)
         density = (internal_weight * 100) / n if n > 0 else 0
 
-        total_weight = sum(_G.degree(u, weight='weight') for u in comm)
+        total_weight = sum(G.degree(u, weight='weight') for u in comm)
         external_weight = total_weight - (2 * internal_weight)
         centrality = external_weight * 10
 
@@ -649,7 +663,7 @@ def ppm_distance(s1: str, s2: str) -> float:
 # ==============================
 # ALGORITMA GRAPH EXPORTER (GEXF)
 # ==============================
-def generate_gexf_string(_G: nx.Graph) -> bytes:
+def generate_gexf_string(G: nx.Graph) -> bytes:
     gexf = ET.Element('gexf', xmlns="http://www.gexf.net/1.2draft", version="1.2")
     graph = ET.SubElement(gexf, 'graph', mode="static", defaultedgetype="undirected")
     
@@ -657,14 +671,14 @@ def generate_gexf_string(_G: nx.Graph) -> bytes:
     ET.SubElement(attributes, 'attribute', id="0", title="weight", type="integer")
     
     nodes_elem = ET.SubElement(graph, 'nodes')
-    for node in _G.nodes():
+    for node in G.nodes():
         node_elem = ET.SubElement(nodes_elem, 'node', id=node, label=node)
         attvalues = ET.SubElement(node_elem, 'attvalues')
-        ET.SubElement(attvalues, 'attvalue', {'for': "0", 'value': str(_G.nodes[node].get('freq', 1))})
+        ET.SubElement(attvalues, 'attvalue', {'for': "0", 'value': str(G.nodes[node].get('freq', 1))})
         
     edges_elem = ET.SubElement(graph, 'edges')
-    for i, (u, v) in enumerate(_G.edges()):
-        edge_weight = _G[u][v].get('raw_weight', _G[u][v].get('weight', 1))
+    for i, (u, v) in enumerate(G.edges()):
+        edge_weight = G[u][v].get('raw_weight', G[u][v].get('weight', 1))
         ET.SubElement(edges_elem, 'edge', id=str(i), source=u, target=v, weight=str(edge_weight))
         
     return ET.tostring(gexf, encoding='utf-8', xml_declaration=True)
@@ -1834,11 +1848,12 @@ elif len(st.session_state.history) > 0:
                                 net.repulsion(node_distance=150, spring_length=200)
                                 
                                 try:
-                                    path = "network_temp.html"
-                                    net.save_graph(path)
-                                    with open(path, 'r', encoding='utf-8') as HtmlFile:
-                                        source_code = HtmlFile.read()
-                                    components.html(source_code, height=670, scrolling=True)
+                                    # MENGGUNAKAN TEMPFILE UNTUK MENCEGAH RACE CONDITION MULTI-USER
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
+                                        net.save_graph(tmp_file.name)
+                                        with open(tmp_file.name, 'r', encoding='utf-8') as HtmlFile:
+                                            source_code = HtmlFile.read()
+                                        components.html(source_code, height=670, scrolling=True)
                                 except Exception as e:
                                     st.error(f"Gagal merender interaktivitas graf Pyvis: {e}")
                             else:
@@ -1861,8 +1876,9 @@ elif len(st.session_state.history) > 0:
                             df_theme['Label Bubble'] = df_theme['keywords'].apply(lambda kws: "<br>".join(kws[:theme_num_labels]))
                             df_theme['Anggota Parsial'] = df_theme['keywords'].apply(lambda kws: ", ".join(kws))
                             
-                            mid_c = df_theme['Centrality'].mean() if not df_theme['Centrality'].empty else 0
-                            mid_d = df_theme['Density'].mean() if not df_theme['Density'].empty else 0
+                            # Mengubah mean() menjadi median() agar kuadran lebih resisten terhadap outlier ekstrem
+                            mid_c = df_theme['Centrality'].median() if not df_theme['Centrality'].empty else 0
+                            mid_d = df_theme['Density'].median() if not df_theme['Density'].empty else 0
                             
                             fig_theme = px.scatter(df_theme, x="Centrality", y="Density", size="Volume Representasi", color="Nama Tema Kunci", hover_name="Nama Tema Kunci", hover_data={"Centrality": True, "Density": True, "Volume Representasi": True, "Label Bubble": False, "Nama Tema Kunci": False}, text="Label Bubble", size_max=85, height=700, color_discrete_sequence=color_palette)
                             
@@ -1988,76 +2004,91 @@ elif len(st.session_state.history) > 0:
                     # 4. THREE-FIELDS PLOT (SANKEY)
                     # ===============================================
                     with tab_three:
-                        st.markdown("#### 🔀 Three-Fields Plot")
-                        st.caption("Visualisasi komprehensif Penulis (Kiri) ➔ Kata Kunci (Tengah) ➔ Jurnal (Kanan).")
+                        st.markdown("#### 🔀 Three-Fields Plot Dinamis")
+                        st.caption("Visualisasi komprehensif 3 entitas untuk melihat relasi persilangan (Misal: Negara ➔ Penulis ➔ Topik).")
                         
-                        if not author_col or not journal_col:
-                            st.warning("Metadata Penulis atau Jurnal tidak lengkap dalam dataset.")
-                        else:
-                            try:
-                                N_TOP = 15 
-                                tf_df = data.copy()
-                                
-                                auth_list = tf_df[author_col].astype(str).str.split(";")
-                                jour_list = tf_df[journal_col].astype(str)
-                                
-                                if actual_net_delim:
-                                    key_list = tf_df[net_col].astype(str).str.lower().str.split(actual_net_delim)
+                        # DINAMISASI THREE-FIELDS PLOT
+                        col_tf1, col_tf2, col_tf3 = st.columns(3)
+                        with col_tf1: 
+                            field_left = st.selectbox("Field Kiri (Kategori 1):", data.columns, index=data.columns.tolist().index(author_col) if author_col in data.columns else 0)
+                        with col_tf2: 
+                            field_mid = st.selectbox("Field Tengah (Kategori 2):", data.columns, index=data.columns.tolist().index(net_col) if net_col in data.columns else 1 % len(data.columns))
+                        with col_tf3: 
+                            field_right = st.selectbox("Field Kanan (Kategori 3):", data.columns, index=data.columns.tolist().index(journal_col) if journal_col in data.columns else 2 % len(data.columns))
+
+                        try:
+                            N_TOP = 15 
+                            tf_df = data.copy()
+                            
+                            # Fungsi untuk mengekstrak list items dengan auto-delimiter detection
+                            def get_items(series, force_delim=None):
+                                if force_delim:
+                                    return series.astype(str).str.split(force_delim)
                                 else:
-                                    key_list = tf_df[net_col].astype(str).str.lower().apply(lambda x: [x])
+                                    sample = series.dropna().astype(str).head(50).str.cat(sep='')
+                                    delim = ';' if ';' in sample else (',' if ',' in sample else ('|' if '|' in sample else None))
+                                    if delim:
+                                        return series.astype(str).str.split(delim)
+                                    return series.astype(str).apply(lambda x: [x])
+
+                            list_left = get_items(tf_df[field_left])
+                            list_mid = get_items(tf_df[field_mid])
+                            list_right = get_items(tf_df[field_right])
+                            
+                            all_l = [i.strip() for sublist in list_left.dropna() for i in sublist if i.strip() and i.strip().lower() not in COMMON_STOPWORDS and len(i.strip()) > 1]
+                            top_l = [x[0] for x in Counter(all_l).most_common(N_TOP)]
+                            
+                            all_m = [i.strip() for sublist in list_mid.dropna() for i in sublist if i.strip() and i.strip().lower() not in COMMON_STOPWORDS and len(i.strip()) > 1]
+                            top_m = [x[0] for x in Counter(all_m).most_common(N_TOP)]
+                            
+                            all_r = [i.strip() for sublist in list_right.dropna() for i in sublist if i.strip() and i.strip().lower() not in COMMON_STOPWORDS and len(i.strip()) > 1]
+                            top_r = [x[0] for x in Counter(all_r).most_common(N_TOP)]
+                            
+                            labels = top_l + top_m + top_r
+                            
+                            link_counts_lm = defaultdict(int)
+                            link_counts_mr = defaultdict(int)
+                            
+                            for i in range(len(tf_df)):
+                                vals_l = [x.strip() for x in list_left.iloc[i] if x.strip() in top_l] if isinstance(list_left.iloc[i], list) else []
+                                vals_m = [x.strip() for x in list_mid.iloc[i] if x.strip() in top_m] if isinstance(list_mid.iloc[i], list) else []
+                                vals_r = [x.strip() for x in list_right.iloc[i] if x.strip() in top_r] if isinstance(list_right.iloc[i], list) else []
                                 
-                                all_a = [a.strip() for sublist in auth_list.dropna() for a in sublist if a.strip()]
-                                top_a = [x[0] for x in Counter(all_a).most_common(N_TOP)]
+                                for l in vals_l:
+                                    for m in vals_m:
+                                        link_counts_lm[(l, m)] += 1
                                 
-                                all_j = [j.strip() for j in jour_list.dropna() if j.strip()]
-                                top_j = [x[0] for x in Counter(all_j).most_common(N_TOP)]
+                                for m in vals_m:
+                                    for r in vals_r:
+                                        link_counts_mr[(m, r)] += 1
+                            
+                            source_idx = []
+                            target_idx = []
+                            vals = []
+                            
+                            for (l, m), v in link_counts_lm.items():
+                                source_idx.append(labels.index(l))
+                                target_idx.append(labels.index(m))
+                                vals.append(v)
                                 
-                                all_k = [k.strip() for sublist in key_list.dropna() for k in sublist if k.strip() and k.strip() not in COMMON_STOPWORDS and k.strip() not in ["tidak tersedia", "n/a", "no title"]]
-                                top_k = [x[0] for x in Counter(all_k).most_common(N_TOP)]
+                            for (m, r), v in link_counts_mr.items():
+                                source_idx.append(labels.index(m))
+                                target_idx.append(labels.index(r))
+                                vals.append(v)
                                 
-                                labels = top_a + top_k + top_j
-                                
-                                link_counts_ak = defaultdict(int)
-                                link_counts_kj = defaultdict(int)
-                                
-                                for i in range(len(tf_df)):
-                                    a_s = [a.strip() for a in auth_list.iloc[i] if a.strip() in top_a] if isinstance(auth_list.iloc[i], list) else []
-                                    k_s = [k.strip() for k in key_list.iloc[i] if k.strip() in top_k] if isinstance(key_list.iloc[i], list) else []
-                                    j_val = jour_list.iloc[i].strip()
-                                    j_s = [j_val] if j_val in top_j else []
-                                    
-                                    for a in a_s:
-                                        for k in k_s:
-                                            link_counts_ak[(a, k)] += 1
-                                    
-                                    for k in k_s:
-                                        for j in j_s:
-                                            link_counts_kj[(k, j)] += 1
-                                
-                                source_idx = []
-                                target_idx = []
-                                vals = []
-                                
-                                for (a, k), v in link_counts_ak.items():
-                                    source_idx.append(labels.index(a))
-                                    target_idx.append(labels.index(k))
-                                    vals.append(v)
-                                    
-                                for (k, j), v in link_counts_kj.items():
-                                    source_idx.append(labels.index(k))
-                                    target_idx.append(labels.index(j))
-                                    vals.append(v)
-                                    
+                            if len(source_idx) > 0:
                                 fig_three = go.Figure(data=[go.Sankey(
                                     node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels, color="#2ecc71"),
                                     link=dict(source=source_idx, target=target_idx, value=vals, color="rgba(46, 204, 113, 0.4)")
                                 )])
                                 
-                                fig_three.update_layout(title_text="Authors ➔ Keywords ➔ Journals", font_size=11, height=750)
+                                fig_three.update_layout(title_text=f"{field_left} ➔ {field_mid} ➔ {field_right}", font_size=11, height=750)
                                 st.plotly_chart(fig_three, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                                
-                            except Exception as e:
-                                st.error(f"Gagal memproses matriks 3 dimensi: {e}")
+                            else:
+                                st.warning("Tidak ditemukan irisan data yang cukup untuk memplot diagram Sankey antar ketiga kolom ini.")
+                            
+                        except Exception as e:
+                            st.error(f"Gagal memproses matriks 3 dimensi: {e}")
 
                     # ===============================================
                     # 5. TABLES AND NODE CENTRALITY METRICS
