@@ -178,27 +178,6 @@ st.markdown("""
         background-color: #4a90e2;
         color: white;
     }
-    /* Tab tidak aktif */
-.stTabs [data-baseweb="tab"] {
-    height: 50px;
-    white-space: pre-wrap;
-    background-color: #f1f3f6;
-    border-radius: 5px 5px 0 0;
-    padding-left: 15px;
-    padding-right: 15px;
-    color: #000000 !important; /* <<< ini biar hitam */
-}
-
-/* Tab aktif */
-.stTabs [aria-selected="true"] {
-    background-color: #4a90e2;
-    color: white !important;
-}
-
-/* Optional: hover biar lebih jelas */
-.stTabs [data-baseweb="tab"]:hover {
-    color: #000000;
-}
     </style>
     """, unsafe_allow_html=True)
 
@@ -712,6 +691,7 @@ def get_column_mappings(columns_tuple):
         'citation_col': next((col for col in ['Citasi', 'Cited by', 'citedby-count', 'TC'] if col in columns), None),
         'abstract_col': next((col for col in ['Abstract', 'abstract', 'Description', 'AB', 'Abstrak'] if col in columns), None),
         'affiliation_col': next((col for col in ['Negara Afiliasi', 'Affiliation', 'Affiliations', 'C1', 'Country', 'Country Code'] if col in columns), None),
+        'ipc_col': next((col for col in ['IPC', 'I P C'] if col in columns), None),
         # WIPO Specific Extensions (Optional, safe mapping fallback)
         'application_id_col': next((col for col in ['Application Id', 'Application ID'] if col in columns), None),
         'application_number_col': next((col for col in ['Application Number'] if col in columns), None),
@@ -1524,6 +1504,8 @@ elif len(st.session_state.history) > 0:
         st.title("🤖 Generative AI Literature Synthesis")
         st.markdown("Mesin analitik kualitatif. Memanfaatkan Large Language Models (LLM) untuk membaca seluruh metadata abstrak dan mengekstrak narasi kesimpulan secara massal (Batching).")
         
+        ipc_col = col_mappings.get('ipc_col')
+        
         col_cfg1, col_cfg2 = st.columns(2)
         with col_cfg1:
             target_col = st.selectbox("Pilih Kolom Narasi Target (Misal: Abstract / Title):", data.columns)
@@ -1542,6 +1524,10 @@ elif len(st.session_state.history) > 0:
             if year_col: sort_options.extend(["Terbaru (Descending Year)", "Terlama (Ascending Year)"])
             if citation_col: sort_options.append("High-Impact (Sitasi Terbanyak)")
             sort_order = st.selectbox("Prioritas Penyaringan Corpus:", sort_options)
+            
+            ipc_filter = ""
+            if ipc_col:
+                ipc_filter = st.text_input("Syarat Tambahan: Filter Kode IPC (Opsional)", placeholder="Misal: A61K. Kosongkan = Tidak Ada")
 
         if st.button("🚀 Eksekusi Mesin AI Batching", type="primary"):
             if not AI_API_KEY: 
@@ -1550,66 +1536,74 @@ elif len(st.session_state.history) > 0:
                 st.warning("⚠️ Untuk Custom Prompt, area ketik instruksi mutlak diperlukan.")
             else:
                 ai_data = data.copy()
-                if sort_order == "Terbaru (Descending Year)" and year_col: 
-                    if 'Year_Numeric' in ai_data.columns:
-                        ai_data = ai_data.sort_values(by='Year_Numeric', ascending=False)
-                elif sort_order == "Terlama (Ascending Year)" and year_col: 
-                    if 'Year_Numeric' in ai_data.columns:
-                        ai_data = ai_data.sort_values(by='Year_Numeric', ascending=True)
-                elif sort_order == "High-Impact (Sitasi Terbanyak)" and citation_col:
-                    ai_data[citation_col] = pd.to_numeric(ai_data[citation_col], errors='coerce').fillna(0)
-                    ai_data = ai_data.sort_values(by=citation_col, ascending=False)
                 
-                docs_to_process = []
-                sampled_titles = [] 
-                
-                for i in range(min(num_samples, len(ai_data))):
-                    doc_text = str(ai_data[target_col].iloc[i])
-                    # Potong panjang abstrak max 1500 char untuk hemat token API
-                    doc_text_safe = doc_text[:1500] + "..." if len(doc_text) > 1500 else doc_text
-
-                    if title_col:
-                        doc_title = str(ai_data[title_col].iloc[i])
-                        sampled_titles.append(f"**[{i+1}]** {doc_title}")
-                        docs_to_process.append(f"Dokumen {i+1} [TI: {doc_title}]:\n{doc_text_safe}\n\n")
-                    else:
-                        sampled_titles.append(f"**[{i+1}]** (Metadata Judul tidak direferensikan)")
-                        docs_to_process.append(f"Dokumen {i+1}:\n{doc_text_safe}\n\n")
-
-                task_to_send = custom_prompt if analysis_task == "Tanya Bebas (Custom Prompt)" else analysis_task
-                system_prompt = f"Anda adalah Profesor dan Analis Riset Akademik Senior. Lakukan insturksi berikut terhadap batch dokumen ini: {task_to_send}\nATURAN KETAT: 1. Selalu referensikan dokumen dengan 'Judul Asli' miliknya. 2. JANGAN mengubah/menerjemahkan frasa 'Judul Asli'. 3. Keluaran harus menggunakan kaidah Bahasa Indonesia yang tinggi, tertata, dan saintifik."
-
-                st.markdown("---")
-                st.markdown(f"### 📝 Output Laporan Dinamis ({AI_PROVIDER})")
-                with st.expander(f"📄 Indeks Corpus Terpilih (Total {len(sampled_titles)} Dokumen)", expanded=False):
-                    for title in sampled_titles: st.markdown(title)
-                
-                BATCH_SIZE = 15 
-                full_report_text = ""
-                
-                for i in range(0, len(docs_to_process), BATCH_SIZE):
-                    batch = docs_to_process[i:i+BATCH_SIZE]
-                    formatted_texts = "".join(batch)
-                    
-                    chunk_no = i//BATCH_SIZE + 1
-                    total_chunks = (len(docs_to_process)-1)//BATCH_SIZE + 1
-                    user_prompt = f"Konstan. Berikut adalah Data Batch ({chunk_no} from {total_chunks}). Evaluasi bagian corpus ini:\n\n{formatted_texts}"
-                    
-                    st.markdown(f"##### ⏳ Streaming Inference (Batch {chunk_no}/{total_chunks}) [Dokumen ke-{i+1} s/d {i+len(batch)}]...")
-                    with st.container(border=True):
-                        if AI_PROVIDER == "Mistral":
-                            result_text = st.write_stream(stream_mistral(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
-                        elif AI_PROVIDER == "Google Gemini":
-                            result_text = st.write_stream(stream_gemini(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
+                # FILTER IPC
+                if ipc_col and ipc_filter.strip():
+                    ai_data = ai_data[ai_data[ipc_col].astype(str).str.contains(ipc_filter.strip(), case=False, na=False)]
+                    if ai_data.empty:
+                        st.error(f"⚠️ Tidak ditemukan dokumen dengan kode IPC yang mengandung '{ipc_filter}'.")
                         
-                        if "❌ Error" not in result_text:
-                            full_report_text += f"\n\n=======================================\nSINTESIS BATCH {chunk_no} (DOKUMEN {i+1}-{i+len(batch)})\n=======================================\n" + result_text
+                if not ai_data.empty:
+                    if sort_order == "Terbaru (Descending Year)" and year_col: 
+                        if 'Year_Numeric' in ai_data.columns:
+                            ai_data = ai_data.sort_values(by='Year_Numeric', ascending=False)
+                    elif sort_order == "Terlama (Ascending Year)" and year_col: 
+                        if 'Year_Numeric' in ai_data.columns:
+                            ai_data = ai_data.sort_values(by='Year_Numeric', ascending=True)
+                    elif sort_order == "High-Impact (Sitasi Terbanyak)" and citation_col:
+                        ai_data[citation_col] = pd.to_numeric(ai_data[citation_col], errors='coerce').fillna(0)
+                        ai_data = ai_data.sort_values(by=citation_col, ascending=False)
+                    
+                    docs_to_process = []
+                    sampled_titles = [] 
+                    
+                    for i in range(min(num_samples, len(ai_data))):
+                        doc_text = str(ai_data[target_col].iloc[i])
+                        # Potong panjang abstrak max 1500 char untuk hemat token API
+                        doc_text_safe = doc_text[:1500] + "..." if len(doc_text) > 1500 else doc_text
 
-                if full_report_text:
-                    st.success("✅ Seluruh antrian Batch berhasil dieksekusi secara berurutan.")
-                    st.download_button("📥 Ekspor Laporan Skrip (.txt)", data=full_report_text, file_name="laporan_ai_sintesis_full.txt", mime="text/plain", type="primary")
+                        if title_col:
+                            doc_title = str(ai_data[title_col].iloc[i])
+                            sampled_titles.append(f"**[{i+1}]** {doc_title}")
+                            docs_to_process.append(f"Dokumen {i+1} [TI: {doc_title}]:\n{doc_text_safe}\n\n")
+                        else:
+                            sampled_titles.append(f"**[{i+1}]** (Metadata Judul tidak direferensikan)")
+                            docs_to_process.append(f"Dokumen {i+1}:\n{doc_text_safe}\n\n")
 
-                gc.collect()
+                    task_to_send = custom_prompt if analysis_task == "Tanya Bebas (Custom Prompt)" else analysis_task
+                    system_prompt = f"Anda adalah Profesor dan Analis Riset Akademik Senior. Lakukan insturksi berikut terhadap batch dokumen ini: {task_to_send}\nATURAN KETAT: 1. Selalu referensikan dokumen dengan 'Judul Asli' miliknya. 2. JANGAN mengubah/menerjemahkan frasa 'Judul Asli'. 3. Keluaran harus menggunakan kaidah Bahasa Indonesia yang tinggi, tertata, dan saintifik."
+
+                    st.markdown("---")
+                    st.markdown(f"### 📝 Output Laporan Dinamis ({AI_PROVIDER})")
+                    with st.expander(f"📄 Indeks Corpus Terpilih (Total {len(sampled_titles)} Dokumen)", expanded=False):
+                        for title in sampled_titles: st.markdown(title)
+                    
+                    BATCH_SIZE = 15 
+                    full_report_text = ""
+                    
+                    for i in range(0, len(docs_to_process), BATCH_SIZE):
+                        batch = docs_to_process[i:i+BATCH_SIZE]
+                        formatted_texts = "".join(batch)
+                        
+                        chunk_no = i//BATCH_SIZE + 1
+                        total_chunks = (len(docs_to_process)-1)//BATCH_SIZE + 1
+                        user_prompt = f"Konstan. Berikut adalah Data Batch ({chunk_no} from {total_chunks}). Evaluasi bagian corpus ini:\n\n{formatted_texts}"
+                        
+                        st.markdown(f"##### ⏳ Streaming Inference (Batch {chunk_no}/{total_chunks}) [Dokumen ke-{i+1} s/d {i+len(batch)}]...")
+                        with st.container(border=True):
+                            if AI_PROVIDER == "Mistral":
+                                result_text = st.write_stream(stream_mistral(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
+                            elif AI_PROVIDER == "Google Gemini":
+                                result_text = st.write_stream(stream_gemini(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
+                            
+                            if "❌ Error" not in result_text:
+                                full_report_text += f"\n\n=======================================\nSINTESIS BATCH {chunk_no} (DOKUMEN {i+1}-{i+len(batch)})\n=======================================\n" + result_text
+
+                    if full_report_text:
+                        st.success("✅ Seluruh antrian Batch berhasil dieksekusi secara berurutan.")
+                        st.download_button("📥 Ekspor Laporan Skrip (.txt)", data=full_report_text, file_name="laporan_ai_sintesis_full.txt", mime="text/plain", type="primary")
+
+                    gc.collect()
 
     # ---------------------------------------------------------
     # MENU 5: CONCEPTUAL STRUCTURE (SCIENCE MAPPING - BIBLIOSHINY)
@@ -2248,7 +2242,11 @@ elif len(st.session_state.history) > 0:
                     "⏳ Bagaimana evolusi atau pergeseran fokus topik penelitian ini dari waktu ke waktu?",
                     "🧩 Teori, model, atau kerangka konseptual apa saja yang sering menjadi landasan studi?",
                     "⚠️ Apa saja batasan penelitian (limitations) yang paling sering disebutkan oleh para penulis?",
-                    "💼 Apa saja implikasi praktis atau rekomendasi yang disarankan dari temuan-temuan ini?"
+                    "💼 Apa saja implikasi praktis atau rekomendasi yang disarankan dari temuan-temuan ini?",
+                    # Template Khusus WIPO
+                    "⚙️ [WIPO] Apa saja teknologi atau paten utama (berdasarkan klasifikasi IPC) yang paling banyak muncul?",
+                    "🏢 [WIPO] Siapa saja perusahaan atau inventor (Applicant/Inventor) paling dominan dalam dataset paten ini?",
+                    "🛠️ [WIPO] Berdasarkan abstrak paten, apa masalah teknis utama yang berusaha diselesaikan oleh penemuan-penemuan ini?"
                 ]
                 
                 pilihan_user = st.radio("Pilih panduan pertanyaan (Pilihan Ganda):", opsi_template)
@@ -2287,7 +2285,10 @@ elif len(st.session_state.history) > 0:
                                 opsi_template[7]: "evolution history past shift focus review decade trend",
                                 opsi_template[8]: "theory conceptual model framework foundation literature theoretical",
                                 opsi_template[9]: "limitation restrict downside future work scope boundaries constraint",
-                                opsi_template[10]: "practical implication industry policy practice application real world"
+                                opsi_template[10]: "practical implication industry policy practice application real world",
+                                opsi_template[11]: "ipc patent technology classification field code invention",
+                                opsi_template[12]: "applicant inventor company assignee patent dominate top owner",
+                                opsi_template[13]: "problem technical solve solution overcome invention patent abstract method"
                             }
                             
                             search_query = template_keywords[pilihan_user]
