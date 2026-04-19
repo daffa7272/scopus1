@@ -1,21 +1,3 @@
-"""
-=============================================================================
-SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
-=============================================================================
-Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
-dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
-
-Versi Enterprise ini dilengkapi dengan:
-- Natural Language Processing (NLP)
-- Machine Learning Topic Modeling (LDA)
-- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
-- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
-- Advanced Graph Topology (NetworkX & Pyvis)
-- Generative AI Integration (Mistral, Gemini)
-- Local Storage Persistence (Penyimpanan API & Konfigurasi)
-=============================================================================
-"""
-
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -178,6 +160,27 @@ st.markdown("""
         background-color: #4a90e2;
         color: white;
     }
+            /* Tab tidak aktif */
+.stTabs [data-baseweb="tab"] {
+    height: 50px;
+    white-space: pre-wrap;
+    background-color: #f1f3f6;
+    border-radius: 5px 5px 0 0;
+    padding-left: 15px;
+    padding-right: 15px;
+    color: #000000 !important; /* <<< ini biar hitam */
+}
+
+/* Tab aktif */
+.stTabs [aria-selected="true"] {
+    background-color: #4a90e2;
+    color: white !important;
+}
+
+/* Optional: hover biar lebih jelas */
+.stTabs [data-baseweb="tab"]:hover {
+    color: #000000;
+}
     </style>
     """, unsafe_allow_html=True)
 
