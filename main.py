@@ -9,7 +9,7 @@ Versi Enterprise ini dilengkapi dengan:
 - Natural Language Processing (NLP)
 - Machine Learning Topic Modeling (LDA)
 - Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
-- Geo-spatial Choropleth Mapping
+- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
 - Advanced Graph Topology (NetworkX & Pyvis)
 - Generative AI Integration (Mistral, Gemini)
 - Local Storage Persistence (Penyimpanan API & Konfigurasi)
@@ -178,6 +178,27 @@ st.markdown("""
         background-color: #4a90e2;
         color: white;
     }
+    /* Tab tidak aktif */
+.stTabs [data-baseweb="tab"] {
+    height: 50px;
+    white-space: pre-wrap;
+    background-color: #f1f3f6;
+    border-radius: 5px 5px 0 0;
+    padding-left: 15px;
+    padding-right: 15px;
+    color: #000000 !important; /* <<< ini biar hitam */
+}
+
+/* Tab aktif */
+.stTabs [aria-selected="true"] {
+    background-color: #4a90e2;
+    color: white !important;
+}
+
+/* Optional: hover biar lebih jelas */
+.stTabs [data-baseweb="tab"]:hover {
+    color: #000000;
+}
     </style>
     """, unsafe_allow_html=True)
 
@@ -206,31 +227,84 @@ COMMON_STOPWORDS = {
     "not", "but", "what", "where", "when", "who", "why", "how", "all", "any", "both"
 }
 
-COUNTRY_ISO_MAPPING = {
-    "Afghanistan": "AFG", "Albania": "ALB", "Algeria": "DZA", "Andorra": "AND", "Angola": "AGO", 
-    "Argentina": "ARG", "Armenia": "ARM", "Australia": "AUS", "Austria": "AUT", "Azerbaijan": "AZE", 
-    "Bahrain": "BHR", "Bangladesh": "BGD", "Belgium": "BEL", "Brazil": "BRA", "Bulgaria": "BGR", 
-    "Cambodia": "KHM", "Cameroon": "CMR", "Canada": "CAN", "Chile": "CHL", "China": "CHN", 
-    "Colombia": "COL", "Costa Rica": "CRI", "Croatia": "HRV", "Cuba": "CUB", "Cyprus": "CYP", 
-    "Czechia": "CZE", "Denmark": "DNK", "Ecuador": "ECU", "Egypt": "EGY", "Estonia": "EST", 
-    "Ethiopia": "ETH", "Fiji": "FJI", "Finland": "FIN", "France": "FRA", "Georgia": "GEO", 
-    "Germany": "DEU", "Ghana": "GHA", "Greece": "GRC", "Hungary": "HUN", "Iceland": "ISL", 
-    "India": "IND", "Indonesia": "IDN", "Iran": "IRN", "Iraq": "IRQ", "Ireland": "IRL", 
-    "Israel": "ISR", "Italy": "ITA", "Jamaica": "JAM", "Japan": "JPN", "Jordan": "JOR", 
-    "Kazakhstan": "KAZ", "Kenya": "KEN", "Kuwait": "KWT", "Lebanon": "LBN", "Lithuania": "LTU", 
-    "Luxembourg": "LUX", "Madagascar": "MDG", "Malaysia": "MYS", "Mexico": "MEX", "Morocco": "MAR", 
-    "Nepal": "NPL", "Netherlands": "NLD", "New Zealand": "NZL", "Nigeria": "NGA", "Norway": "NOR", 
-    "Oman": "OMN", "Pakistan": "PAK", "Palestine": "PSE", "Peru": "PER", "Philippines": "PHL", 
-    "Poland": "POL", "Portugal": "PRT", "Qatar": "QAT", "Romania": "ROU", "Russia": "RUS", 
-    "Russian Federation": "RUS", "Saudi Arabia": "SAU", "Senegal": "SEN", "Serbia": "SRB", 
-    "Singapore": "SGP", "Slovakia": "SVK", "Slovenia": "SVN", "South Africa": "ZAF", 
-    "South Korea": "KOR", "Spain": "ESP", "Sri Lanka": "LKA", "Sudan": "SDN", "Sweden": "SWE", 
-    "Switzerland": "CHE", "Taiwan": "TWN", "Tanzania": "TZA", "Thailand": "THA", "Tunisia": "TUN", 
-    "Turkey": "TUR", "Uganda": "UGA", "Ukraine": "UKR", "United Arab Emirates": "ARE", "UAE": "ARE", 
-    "United Kingdom": "GBR", "UK": "GBR", "England": "GBR", "United States": "USA", "USA": "USA", 
-    "United States of America": "USA", "Uruguay": "URY", "Uzbekistan": "UZB", "Venezuela": "VEN", 
-    "Vietnam": "VNM", "Zambia": "ZMB", "Zimbabwe": "ZWE"
+# Mapping 2 Huruf WIPO ke 3 Huruf ISO (Agar bisa digambar di peta Plotly)
+WIPO_2_LETTER_TO_ISO3 = {
+    "AE": "ARE", "AG": "ATG", "AL": "ALB", "AM": "ARM", "AO": "AGO", "AT": "AUT", "AU": "AUS", 
+    "AZ": "AZE", "BA": "BIH", "BB": "BRB", "BE": "BEL", "BF": "BFA", "BG": "BGR", "BH": "BHR", 
+    "BJ": "BEN", "BN": "BRN", "BR": "BRA", "BW": "BWA", "BY": "BLR", "BZ": "BLZ", "CA": "CAN", 
+    "CF": "CAF", "CG": "COG", "CH": "CHE", "CI": "CIV", "CL": "CHL", "CM": "CMR", "CN": "CHN", 
+    "CO": "COL", "CR": "CRI", "CU": "CUB", "CV": "CPV", "CY": "CYP", "CZ": "CZE", "DE": "DEU", 
+    "DJ": "DJI", "DK": "DNK", "DM": "DMA", "DO": "DOM", "DZ": "DZA", "EC": "ECU", "EE": "EST", 
+    "EG": "EGY", "ES": "ESP", "FI": "FIN", "FR": "FRA", "GA": "GAB", "GB": "GBR", "GD": "GRD", 
+    "GE": "GEO", "GH": "GHA", "GM": "GMB", "GN": "GIN", "GQ": "GNQ", "GR": "GRC", "GT": "GTM", 
+    "GW": "GNB", "HN": "HND", "HR": "HRV", "HU": "HUN", "ID": "IDN", "IE": "IRL", "IL": "ISR", 
+    "IN": "IND", "IQ": "IRQ", "IR": "IRN", "IS": "ISL", "IT": "ITA", "JM": "JAM", "JO": "JOR", 
+    "JP": "JPN", "KE": "KEN", "KG": "KGZ", "KH": "KHM", "KM": "COM", "KN": "KNA", "KP": "PRK", 
+    "KR": "KOR", "KW": "KWT", "KZ": "KAZ", "LA": "LAO", "LC": "LCA", "LI": "LIE", "LK": "LKA", 
+    "LR": "LBR", "LS": "LSO", "LT": "LTU", "LU": "LUX", "LV": "LVA", "LY": "LBY", "MA": "MAR", 
+    "MC": "MCO", "MD": "MDA", "ME": "MNE", "MG": "MDG", "MK": "MKD", "ML": "MLI", "MN": "MNG", 
+    "MR": "MRT", "MT": "MLT", "MU": "MUS", "MW": "MWI", "MX": "MEX", "MY": "MYS", "MZ": "MOZ", 
+    "NA": "NAM", "NE": "NER", "NG": "NGA", "NI": "NIC", "NL": "NLD", "NO": "NOR", "NZ": "NZL", 
+    "OM": "OMN", "PA": "PAN", "PE": "PER", "PG": "PNG", "PH": "PHL", "PL": "POL", "PT": "PRT", 
+    "QA": "QAT", "RO": "ROU", "RS": "SRB", "RU": "RUS", "RW": "RWA", "SA": "SAU", "SC": "SYC", 
+    "SD": "SDN", "SE": "SWE", "SG": "SGP", "SI": "SVN", "SK": "SVK", "SL": "SLE", "SM": "SMR", 
+    "SN": "SEN", "ST": "STP", "SV": "SLV", "SY": "SYR", "SZ": "SWZ", "TD": "TCD", "TG": "TGO", 
+    "TH": "THA", "TJ": "TJK", "TM": "TKM", "TN": "TUN", "TR": "TUR", "TT": "TTO", "TZ": "TZA", 
+    "UA": "UKR", "UG": "UGA", "US": "USA", "UY": "URY", "UZ": "UZB", "VC": "VCT", "VN": "VNM", 
+    "WS": "WSM", "ZA": "ZAF", "ZM": "ZMB", "ZW": "ZWE",
+    "EP": "EPO", "WO": "WIPO", "IB": "WIPO", "EA": "EAPO", "AP": "ARIPO", "OA": "OAPI", "XN": "XNPI", "XV": "XVPI"
 }
+
+# Translasi dari ISO3 ke Nama Negara Full untuk Tooltip
+ISO3_TO_NAME = {
+    "AFG": "Afghanistan", "ALB": "Albania", "DZA": "Algeria", "AND": "Andorra", "AGO": "Angola", 
+    "ARG": "Argentina", "ARM": "Armenia", "AUS": "Australia", "AUT": "Austria", "AZE": "Azerbaijan", 
+    "BHR": "Bahrain", "BGD": "Bangladesh", "BEL": "Belgium", "BRA": "Brazil", "BGR": "Bulgaria", 
+    "KHM": "Cambodia", "CMR": "Cameroon", "CAN": "Canada", "CHL": "Chile", "CHN": "China", 
+    "COL": "Colombia", "CRI": "Costa Rica", "HRV": "Croatia", "CUB": "Cuba", "CYP": "Cyprus", 
+    "CZE": "Czechia", "DNK": "Denmark", "ECU": "Ecuador", "EGY": "Egypt", "EST": "Estonia", 
+    "ETH": "Ethiopia", "FJI": "Fiji", "FIN": "Finland", "FRA": "France", "GEO": "Georgia", 
+    "DEU": "Germany", "GHA": "Ghana", "GRC": "Greece", "HUN": "Hungary", "ISL": "Iceland", 
+    "IND": "India", "IDN": "Indonesia", "IRN": "Iran", "IRQ": "Iraq", "IRL": "Ireland", 
+    "ISR": "Israel", "ITA": "Italy", "JAM": "Jamaica", "JPN": "Japan", "JOR": "Jordan", 
+    "KAZ": "Kazakhstan", "KEN": "Kenya", "KWT": "Kuwait", "LBN": "Lebanon", "LTU": "Lithuania", 
+    "LUX": "Luxembourg", "MDG": "Madagascar", "MYS": "Malaysia", "MEX": "Mexico", "MAR": "Morocco", 
+    "NPL": "Nepal", "NLD": "Netherlands", "NZL": "New Zealand", "NGA": "Nigeria", "NOR": "Norway", 
+    "OMN": "Oman", "PAK": "Pakistan", "PSE": "Palestine", "PER": "Peru", "PHL": "Philippines", 
+    "POL": "Poland", "PRT": "Portugal", "QAT": "Qatar", "ROU": "Romania", "RUS": "Russian Federation", 
+    "SAU": "Saudi Arabia", "SEN": "Senegal", "SRB": "Serbia", "SGP": "Singapore", "SVK": "Slovakia", 
+    "SVN": "Slovenia", "ZAF": "South Africa", "KOR": "Republic of Korea", "ESP": "Spain", "LKA": "Sri Lanka", 
+    "SDN": "Sudan", "SWE": "Sweden", "CHE": "Switzerland", "TWN": "Taiwan", "TZA": "United Republic of Tanzania", 
+    "THA": "Thailand", "TUN": "Tunisia", "TUR": "Türkiye", "UGA": "Uganda", "UKR": "Ukraine", 
+    "ARE": "United Arab Emirates", "GBR": "United Kingdom", "USA": "United States of America", "URY": "Uruguay", 
+    "UZB": "Uzbekistan", "VEN": "Venezuela", "VNM": "Viet Nam", "ZMB": "Zambia", "ZWE": "Zimbabwe",
+    "EPO": "European Patent Organisation", "WIPO": "World Intellectual Property Organization",
+    "EAPO": "Eurasian Patent Organization", "ARIPO": "African Regional Intellectual Property Organization",
+    "OAPI": "African Intellectual Property Organization", "ATG": "Antigua and Barbuda", 
+    "BIH": "Bosnia & Herzegovina", "BRB": "Barbados", "BFA": "Burkina Faso", "BEN": "Benin", 
+    "BRN": "Brunei Darussalam", "BWA": "Botswana", "BLR": "Belarus", "BLZ": "Belize",
+    "CAF": "Central African Republic", "COG": "Congo", "CIV": "Côte d'Ivoire", "CPV": "Cabo Verde",
+    "DJI": "Djibouti", "DMA": "Dominica", "DOM": "Dominican Republic", "GAB": "Gabon", "GRD": "Grenada",
+    "GMB": "Gambia", "GIN": "Guinea", "GNQ": "Equatorial Guinea", "GTM": "Guatemala", "GNB": "Guinea-Bissau",
+    "HND": "Honduras", "COM": "Comoros", "KNA": "Saint Kitts and Nevis", "PRK": "Democratic People's Republic of Korea", 
+    "LAO": "Lao People's Democratic Republic", "LCA": "Saint Lucia", "LIE": "Liechtenstein", "LBR": "Liberia", 
+    "LSO": "Lesotho", "LVA": "Latvia", "LBY": "Libya", "MCO": "Monaco", "MDA": "Republic of Moldova", 
+    "MNE": "Montenegro", "MKD": "North Macedonia", "MLI": "Mali", "MNG": "Mongolia", "MRT": "Mauritania", 
+    "MLT": "Malta", "MUS": "Mauritius", "MWI": "Malawi", "MOZ": "Mozambique", "NAM": "Namibia", 
+    "NER": "Niger", "NIC": "Nicaragua", "PAN": "Panama", "PNG": "Papua New Guinea", "RWA": "Rwanda", 
+    "SYC": "Seychelles", "SLE": "Sierra Leone", "SMR": "San Marino", "STP": "Sao Tome and Principe", 
+    "SLV": "El Salvador", "SYR": "Syrian Arab Republic", "SWZ": "Eswatini", "TCD": "Chad", "TGO": "Togo", 
+    "TJK": "Tajikistan", "TKM": "Turkmenistan", "TTO": "Trinidad and Tobago", "VCT": "Saint Vincent and the Grenadines", 
+    "WSM": "Samoa", "XNPI": "Nordic Patent Institute", "XVPI": "Visegrad Patent Institute"
+}
+
+# Reverse mapping untuk deteksi teks panjang (Scopus/WoS Fallback)
+COUNTRY_ISO_MAPPING = {name: iso for iso, name in ISO3_TO_NAME.items()}
+COUNTRY_ISO_MAPPING.update({
+    "UK": "GBR", "England": "GBR", "USA": "USA", "United States": "USA",
+    "Russia": "RUS", "South Korea": "KOR", "Vietnam": "VNM", "Turkey": "TUR",
+    "Tanzania": "TZA", "UAE": "ARE"
+})
 
 BIBLIOMETRIC_GLOSSARY = {
     "Bradford's Law": "Hukum Bradford mengidentifikasi Jurnal Inti (Core Journals).",
@@ -341,11 +415,28 @@ def convert_df_to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode('utf-8')
 
 def extract_countries_from_text(text: str) -> list:
-    text_lower = str(text).lower()
+    """Ekstraksi Hibrida untuk mendeteksi 2-Letter WIPO Codes atau Teks Nama Negara (Scopus)"""
+    text_str = str(text).strip()
     detected = []
-    for country in COUNTRY_ISO_MAPPING.keys():
-        if re.search(rf'\b{country.lower()}\b', text_lower):
-            detected.append(country)
+    
+    # 1. Cek format kode WIPO 2 huruf (biasanya dipisahkan koma, spasi, atau titik koma)
+    parts = [p.strip().upper() for p in re.split(r'[,;|/\s]+', text_str) if p.strip()]
+    is_wipo_code_format = all(len(p) == 2 for p in parts) if parts else False
+    
+    if is_wipo_code_format:
+        for part in parts:
+            if part in WIPO_2_LETTER_TO_ISO3:
+                iso3 = WIPO_2_LETTER_TO_ISO3[part]
+                country_name = ISO3_TO_NAME.get(iso3, part)
+                detected.append(country_name)
+                
+    # 2. Jika tidak ada yang cocok sebagai 2 huruf, cek full text untuk nama negara (Scopus/WoS fallback)
+    if not detected:
+        text_lower = text_str.lower()
+        for country in COUNTRY_ISO_MAPPING.keys():
+            if re.search(rf'\b{re.escape(country.lower())}\b', text_lower):
+                detected.append(country)
+                
     return list(set(detected))
 
 def get_top_words(text_series: pd.Series, top_n: int = 10) -> pd.DataFrame:
@@ -611,16 +702,22 @@ if 'map_rendered' not in st.session_state: st.session_state.map_rendered = False
 
 @st.cache_data
 def get_column_mappings(columns_tuple):
-    """Mendeteksi nama kolom spesifik hanya sekali dan menyimpannya di memori."""
+    """Mendeteksi nama kolom spesifik dari berbagai sumber (Scopus, WoS, WIPO Patents)"""
     columns = list(columns_tuple)
     return {
-        'year_col': next((col for col in ['Tahun', 'Year', 'year', 'PY', 'Publication Year'] if col in columns), None),
-        'journal_col': next((col for col in ['Jurnal', 'Source title', 'Journal', 'SO'] if col in columns), None),
-        'author_col': next((col for col in ['Penulis', 'Authors', 'Author', 'AU'] if col in columns), None),
+        'year_col': next((col for col in ['Tahun', 'Year', 'year', 'PY', 'Publication Year', 'Publication Date', 'Application Date'] if col in columns), None),
+        'journal_col': next((col for col in ['Jurnal', 'Source title', 'Journal', 'SO', 'IPC', 'I P C', 'Applicants'] if col in columns), None),
+        'author_col': next((col for col in ['Penulis', 'Authors', 'Author', 'AU', 'Inventors'] if col in columns), None),
         'title_col': next((col for col in ['Judul', 'Title', 'title', 'Document Title', 'TI'] if col in columns), None),
         'citation_col': next((col for col in ['Citasi', 'Cited by', 'citedby-count', 'TC'] if col in columns), None),
-        'abstract_col': next((col for col in ['Abstract', 'abstract', 'Description', 'AB'] if col in columns), None),
-        'affiliation_col': next((col for col in ['Negara Afiliasi', 'Affiliation', 'Affiliations', 'C1'] if col in columns), None)
+        'abstract_col': next((col for col in ['Abstract', 'abstract', 'Description', 'AB', 'Abstrak'] if col in columns), None),
+        'affiliation_col': next((col for col in ['Negara Afiliasi', 'Affiliation', 'Affiliations', 'C1', 'Country', 'Country Code'] if col in columns), None),
+        # WIPO Specific Extensions (Optional, safe mapping fallback)
+        'application_id_col': next((col for col in ['Application Id', 'Application ID'] if col in columns), None),
+        'application_number_col': next((col for col in ['Application Number'] if col in columns), None),
+        'publication_number_col': next((col for col in ['Publication Number'] if col in columns), None),
+        'priority_data_col': next((col for col in ['Priority Data', 'Priorities Data'] if col in columns), None),
+        'national_phase_entries_col': next((col for col in ['National Phase Entries'] if col in columns), None)
     }
 
 def apply_transform(func, action_name, is_row_filter=False, target_col=None):
@@ -709,6 +806,20 @@ with st.sidebar:
                 new_settings["gemini_model"] = AI_MODEL
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
+            
+    with st.expander("🧰 WIPO Patent Tools", expanded=False):
+        st.markdown("Akses cepat referensi paten internasional.")
+        st.markdown("[🌐 **Buka Skema IPC WIPO (Tautan Eksternal)**](https://www.wipo.int/ipc/itos4ipc/ITSupport_and_download_area/20260101/pdf/scheme/full_ipc/en/index.html)")
+        st.markdown("---")
+        st.markdown("**🔍 Kamus Kode Negara WIPO**")
+        wipo_query = st.text_input("Ketik 2 Huruf Kode:", max_chars=2, placeholder="Misal: US, EP, WO").strip().upper()
+        if len(wipo_query) == 2:
+            if wipo_query in WIPO_2_LETTER_TO_ISO3:
+                iso_code = WIPO_2_LETTER_TO_ISO3[wipo_query]
+                country_name = ISO3_TO_NAME.get(iso_code, iso_code)
+                st.success(f"✅ **{country_name}**")
+            else:
+                st.error("❌ Kode Tidak Ditemukan")
 
 # ==============================
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
@@ -788,7 +899,7 @@ elif menu_selection == "📥 Data Acquisition":
 
     with col2:
         st.markdown("#### 📁 Opsi 2: Unggah File Lokal (Local Data)")
-        st.info("Bagi pengguna database lain (Web of Science, PubMed, dll), Anda bisa mengunggah format .csv atau .json ke sini.")
+        st.info("Bagi pengguna database lain (Web of Science, PubMed, WIPO Patents), Anda bisa mengunggah format .csv atau .json ke sini.")
         uploaded_file = st.file_uploader("Pilih Berkas", type=["csv", "json"])
         
         if uploaded_file:
@@ -813,7 +924,7 @@ elif len(st.session_state.history) > 0:
     base_data = st.session_state.history[st.session_state.current_step].copy()
     data = base_data.copy() 
 
-    # ====== DETEKSI NAMA KOLOM DINAMIS (CACHED) ======
+    # ====== DETEKSI NAMA KOLOM DINAMIS (CACHED, WIPO COMPATIBLE) ======
     col_mappings = get_column_mappings(tuple(data.columns))
     year_col = col_mappings['year_col']
     journal_col = col_mappings['journal_col']
@@ -822,6 +933,11 @@ elif len(st.session_state.history) > 0:
     citation_col = col_mappings['citation_col']
     abstract_col = col_mappings['abstract_col']
     affiliation_col = col_mappings['affiliation_col']
+
+    # Robust Year Extraction for Dates (e.g., 26.06.2023 -> 2023)
+    if year_col:
+        # Mengekstrak 4 angka berurutan yang merepresentasikan tahun (19xx atau 20xx)
+        data['Year_Numeric'] = pd.to_numeric(data[year_col].astype(str).str.extract(r'((?:19|20)\d{2})')[0], errors='coerce')
 
     # ---------------------------------------------------------
     # MENU 2: OVERVIEW & TRENDS
@@ -834,12 +950,10 @@ elif len(st.session_state.history) > 0:
         m1.metric("📄 Total Dokumen", len(data))
         m2.metric("📋 Total Metadata (Kolom)", len(data.columns))
         
-        if year_col:
-            data['Year_Numeric'] = pd.to_numeric(data[year_col], errors='coerce')
+        if year_col and 'Year_Numeric' in data.columns:
             min_y = int(data['Year_Numeric'].min()) if not pd.isna(data['Year_Numeric'].min()) else "N/A"
             max_y = int(data['Year_Numeric'].max()) if not pd.isna(data['Year_Numeric'].max()) else "N/A"
             m3.metric("📅 Rentang Tahun Publikasi", f"{min_y} - {max_y}")
-            data = data.drop(columns=['Year_Numeric'])
         else:
             m3.metric("📅 Rentang Tahun Publikasi", "Tidak Terdeteksi")
             
@@ -869,15 +983,15 @@ elif len(st.session_state.history) > 0:
         st.markdown("---")
         st.markdown("#### 📈 Analisis Deskriptif Bibliometrik Dasar")
         
-        tab_stats1, tab_stats2, tab_stats3, tab_stats4, tab_stats5 = st.tabs(["📊 Produksi & Sitasi", "🏢 Hukum Kinerja (Lotka & Bradford)", "🗺️ Peta Produksi Negara", "🧠 Topic Modeling (LDA)", "☁️ Word Cloud"])
+        tab_stats1, tab_stats2, tab_stats3, tab_stats4, tab_stats5, tab_stats6 = st.tabs(["📊 Produksi & Sitasi", "🏢 Hukum Kinerja (Lotka & Bradford)", "🗺️ Peta Produksi Negara", "🧠 Topic Modeling (LDA)", "☁️ Word Cloud", "📈 Tren IPC/Kata Kunci"])
         
         # SUBTAB: PRODUKSI
         with tab_stats1:
             col_c1, col_c2 = st.columns(2)
             with col_c1:
-                if year_col:
+                if year_col and 'Year_Numeric' in data.columns:
                     st.markdown("**1. Produksi Dokumen Per Tahun**")
-                    yearly_counts = data[year_col].value_counts().sort_index()
+                    yearly_counts = data['Year_Numeric'].value_counts().sort_index()
                     fig_year = px.area(x=yearly_counts.index, y=yearly_counts.values, labels={'x': 'Tahun Publikasi', 'y': 'Jumlah Dokumen'})
                     fig_year.update_traces(line_color='#4a90e2', fillcolor='rgba(74, 144, 226, 0.3)')
                     fig_year.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis=dict(dtick=1))
@@ -891,23 +1005,23 @@ elif len(st.session_state.history) > 0:
 
             with col_c2:
                 if author_col:
-                    st.markdown("**3. Penulis Paling Produktif (Berdasarkan Frekuensi Kemunculan)**")
+                    st.markdown("**3. Entitas Kreator Paling Produktif (Berdasarkan Frekuensi Kemunculan)**")
                     all_authors = data[author_col].dropna().astype(str).str.split(";").explode().str.strip()
                     top_authors = all_authors[all_authors != ""].value_counts().head(10)
-                    fig_auth = px.bar(x=top_authors.index, y=top_authors.values, text=top_authors.values, labels={'x':'Penulis', 'y':'Jumlah Dokumen'})
+                    fig_auth = px.bar(y=top_authors.index, x=top_authors.values, orientation='h', text=top_authors.values, labels={'y':'Kreator/Penulis', 'x':'Jumlah Dokumen'})
                     fig_auth.update_traces(marker_color='#e74c3c', textposition='outside')
-                    max_y_auth = top_authors.values.max() if len(top_authors) > 0 else 10
-                    fig_auth.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis_tickangle=-45, yaxis=dict(range=[0, max_y_auth * 1.2]))
+                    max_x_auth = top_authors.values.max() if len(top_authors) > 0 else 10
+                    fig_auth.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis=dict(range=[0, max_x_auth * 1.2]))
                     st.plotly_chart(fig_auth, use_container_width=True)
                     
                 if journal_col:
-                    st.markdown("**4. Sumber / Jurnal Penerbit Teratas**")
+                    st.markdown("**4. Sumber / Wadah Klasifikasi Teratas**")
                     top_j = data[journal_col].value_counts().head(10)
-                    short_labels = [str(label)[:25] + '...' if len(str(label)) > 25 else str(label) for label in top_j.index]
-                    fig_j = px.bar(x=short_labels, y=top_j.values, text=top_j.values, labels={'x':'Jurnal', 'y':'Jumlah Dokumen'})
+                    short_labels = [str(label)[:30] + '...' if len(str(label)) > 30 else str(label) for label in top_j.index]
+                    fig_j = px.bar(y=short_labels, x=top_j.values, orientation='h', text=top_j.values, labels={'y':'Kategori/Sumber', 'x':'Jumlah Dokumen'})
                     fig_j.update_traces(marker_color='#2ecc71', textposition='outside')
-                    max_y_jour = top_j.values.max() if len(top_j) > 0 else 10
-                    fig_j.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis_tickangle=-45, yaxis=dict(range=[0, max_y_jour * 1.2]))
+                    max_x_jour = top_j.values.max() if len(top_j) > 0 else 10
+                    fig_j.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(l=0, r=0, t=10, b=0), height=350, xaxis=dict(range=[0, max_x_jour * 1.2]))
                     st.plotly_chart(fig_j, use_container_width=True)
                     
         # SUBTAB: BRADFORD & LOTKA
@@ -1032,6 +1146,64 @@ elif len(st.session_state.history) > 0:
                         ax_wc.imshow(wordcloud, interpolation='bilinear')
                         ax_wc.axis("off")
                         st.pyplot(fig_wc)
+
+        # SUBTAB: TREN IPC / KATA KUNCI
+        with tab_stats6:
+            st.markdown("**Pemetaan Tren Dinamika Topik / Teknologi**")
+            st.caption("Visualisasi pergerakan tren dari kata kunci spesifik (Scopus) atau kode IPC (WIPO) dari tahun ke tahun.")
+            
+            if not year_col or 'Year_Numeric' not in data.columns:
+                st.warning("⚠️ Metadata Tahun Publikasi tidak ditemukan atau tidak dapat diekstrak.")
+            else:
+                text_cols_trend = data.select_dtypes(include=['object']).columns.tolist()
+                if not text_cols_trend:
+                    st.warning("Tidak ada kolom teks untuk dianalisis.")
+                else:
+                    # Coba temukan kolom default yang mengandung kata kunci atau IPC
+                    kw_candidates = [c for c in text_cols_trend if any(kw in c.lower() for kw in ['keyword', 'ipc', 'index', 'class'])]
+                    default_idx_trend = text_cols_trend.index(kw_candidates[0]) if kw_candidates else 0
+                    
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1:
+                        trend_col = st.selectbox("Pilih Kolom Entitas (Misal: Author Keywords / IPC):", text_cols_trend, index=default_idx_trend)
+                    with col_t2:
+                        trend_delim = st.selectbox("Delimiter (Pemisah Entitas):", [";", ",", "|", "Spasi ( )", "Tidak Ada"], index=0)
+                    
+                    if st.button("🚀 Render Garis Tren Temporal", type="primary"):
+                        actual_delim = {";": ";", ",": ",", "|": "|", "Spasi ( )": " "}.get(trend_delim)
+                        
+                        with st.spinner("Menghitung dinamika temporal..."):
+                            temp_df = data[['Year_Numeric', trend_col]].copy().dropna()
+                            
+                            # Pisahkan entitas dengan delimiter
+                            if actual_delim:
+                                temp_df['Entitas'] = temp_df[trend_col].astype(str).str.split(actual_delim)
+                            else:
+                                temp_df['Entitas'] = temp_df[trend_col].astype(str).apply(lambda x: [x])
+                            
+                            temp_df = temp_df.explode('Entitas')
+                            temp_df['Entitas'] = temp_df['Entitas'].astype(str).str.strip().str.upper() # Upper case agar konsisten (baik IPC/Keyword)
+                            
+                            # Pembersihan Entitas
+                            stop_upper = {w.upper() for w in COMMON_STOPWORDS}
+                            valid_mask = (temp_df['Entitas'] != "") & (~temp_df['Entitas'].isin(stop_upper)) & (temp_df['Entitas'].str.len() > 1) & (~temp_df['Entitas'].isin(["TIDAK TERSEDIA", "N/A", "NO TITLE", "NAN"]))
+                            temp_df = temp_df[valid_mask]
+                            
+                            # Ambil top 10 entitas secara global
+                            top_entities = temp_df['Entitas'].value_counts().head(10).index.tolist()
+                            temp_df = temp_df[temp_df['Entitas'].isin(top_entities)]
+                            
+                            # Agregasi per tahun dan entitas
+                            trend_grouped = temp_df.groupby(['Year_Numeric', 'Entitas']).size().reset_index(name='Frekuensi')
+                            
+                            if not trend_grouped.empty:
+                                fig_trend = px.line(trend_grouped, x='Year_Numeric', y='Frekuensi', color='Entitas', markers=True,
+                                                    title=f"Tren Top 10 '{trend_col}' Sepanjang Waktu",
+                                                    labels={'Year_Numeric': 'Tahun', 'Frekuensi': 'Jumlah Kemunculan'})
+                                fig_trend.update_layout(xaxis=dict(dtick=1), margin=dict(l=0, r=0, t=40, b=0))
+                                st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                            else:
+                                st.info("Data tidak mencukupi untuk visualisasi tren.")
 
     # ---------------------------------------------------------
     # MENU 3: DATA CLEANING (OPENREFINE)
@@ -1379,9 +1551,11 @@ elif len(st.session_state.history) > 0:
             else:
                 ai_data = data.copy()
                 if sort_order == "Terbaru (Descending Year)" and year_col: 
-                    ai_data = ai_data.sort_values(by=year_col, ascending=False)
+                    if 'Year_Numeric' in ai_data.columns:
+                        ai_data = ai_data.sort_values(by='Year_Numeric', ascending=False)
                 elif sort_order == "Terlama (Ascending Year)" and year_col: 
-                    ai_data = ai_data.sort_values(by=year_col, ascending=True)
+                    if 'Year_Numeric' in ai_data.columns:
+                        ai_data = ai_data.sort_values(by='Year_Numeric', ascending=True)
                 elif sort_order == "High-Impact (Sitasi Terbanyak)" and citation_col:
                     ai_data[citation_col] = pd.to_numeric(ai_data[citation_col], errors='coerce').fillna(0)
                     ai_data = ai_data.sort_values(by=citation_col, ascending=False)
@@ -1419,7 +1593,7 @@ elif len(st.session_state.history) > 0:
                     
                     chunk_no = i//BATCH_SIZE + 1
                     total_chunks = (len(docs_to_process)-1)//BATCH_SIZE + 1
-                    user_prompt = f"Konstan. Berikut adalah Data Batch ({chunk_no} dari {total_chunks}). Evaluasi bagian corpus ini:\n\n{formatted_texts}"
+                    user_prompt = f"Konstan. Berikut adalah Data Batch ({chunk_no} from {total_chunks}). Evaluasi bagian corpus ini:\n\n{formatted_texts}"
                     
                     st.markdown(f"##### ⏳ Streaming Inference (Batch {chunk_no}/{total_chunks}) [Dokumen ke-{i+1} s/d {i+len(batch)}]...")
                     with st.container(border=True):
@@ -1468,7 +1642,7 @@ elif len(st.session_state.history) > 0:
                         default_idx = cleanable_cols_b.index(author_col) if author_col in cleanable_cols_b else 0
                         net_col = st.selectbox("Entitas Pemetaan (Nodes):", cleanable_cols_b, index=default_idx, key="net_col_author")
                     else:
-                        kw_candidates = [c for c in cleanable_cols_b if 'keyword' in c.lower() or 'authkey' in c.lower() or 'index' in c.lower()]
+                        kw_candidates = [c for c in cleanable_cols_b if 'keyword' in c.lower() or 'authkey' in c.lower() or 'index' in c.lower() or 'ipc' in c.lower()]
                         default_idx = cleanable_cols_b.index(kw_candidates[0]) if kw_candidates else 0
                         net_col = st.selectbox("Entitas Pemetaan (Nodes):", cleanable_cols_b, index=default_idx, key="net_col_coword")
                         
@@ -1579,9 +1753,9 @@ elif len(st.session_state.history) > 0:
                             df_theme = pd.DataFrame()
 
                     network_title = "🕸️ Co-authorship Network" if is_author_network else "🕸️ Co-occurrence Network"
-                    tab_net, tab_map, tab_evol, tab_three, tab_trend, tab_table = st.tabs([
+                    tab_net, tab_map, tab_evol, tab_three, tab_table = st.tabs([
                         network_title, "📍 Thematic Map", "⏳ Thematic Evolution", 
-                        "🔀 Three-Fields Plot", "📈 Trend Topics", "📊 Network Analytics"
+                        "🔀 Three-Fields Plot", "📊 Network Analytics"
                     ])
                     
                     # ===============================================
@@ -1605,14 +1779,17 @@ elif len(st.session_state.history) > 0:
                                 color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
                                 
                                 word_avg_years = {}
-                                if net_color_year == "Yes" and year_col and year_col in df_mapped_net.columns:
+                                if net_color_year == "Yes" and year_col and 'Year_Numeric' in data.columns:
                                     word_years = defaultdict(list)
                                     for idx_df, row in df_mapped_net.iterrows():
                                         try:
-                                            yr = int(row[year_col])
-                                            for w in row[net_col]:
-                                                if w in G_final_net.nodes():
-                                                    word_years[w].append(yr)
+                                            # Robust year lookup
+                                            yr_val = data.iloc[idx_df]['Year_Numeric']
+                                            if not pd.isna(yr_val):
+                                                yr = int(yr_val)
+                                                for w in row[net_col]:
+                                                    if w in G_final_net.nodes():
+                                                        word_years[w].append(yr)
                                         except: pass
                                     word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
                                     
@@ -1742,16 +1919,15 @@ elif len(st.session_state.history) > 0:
                         st.markdown("#### ⏳ Peta Evolusi Aliran Tema (Thematic Evolution Sankey)")
                         st.caption("Diagram komparasi asimetris untuk memvisualisasikan asal usul peleburan konsep antardua periode spektrum waktu publikasi.")
                         
-                        if not year_col:
+                        if not year_col or 'Year_Numeric' not in data.columns:
                             st.warning("Metadata Temporal (Tahun Publikasi) tidak ditemukan. Modul evolusi dinonaktifkan.")
                         else:
                             temp_df = data.copy()
-                            temp_df['Year_Num'] = pd.to_numeric(temp_df[year_col], errors='coerce')
-                            temp_df = temp_df.dropna(subset=['Year_Num'])
+                            temp_df = temp_df.dropna(subset=['Year_Numeric'])
                             
                             if not temp_df.empty:
-                                min_y = int(temp_df['Year_Num'].min())
-                                max_y = int(temp_df['Year_Num'].max())
+                                min_y = int(temp_df['Year_Numeric'].min())
+                                max_y = int(temp_df['Year_Numeric'].max())
                                 
                                 if min_y < max_y:
                                     cut_year = st.slider("Tentukan Garis Limitasi Periode (Cutting Year):", min_y, max_y, (min_y + max_y) // 2)
@@ -1778,8 +1954,8 @@ elif len(st.session_state.history) > 0:
                                         return themes_p
 
                                     with st.spinner("Mengekstrak tema periode longitudinal..."):
-                                        df_p1 = temp_df[temp_df['Year_Num'] <= cut_year]
-                                        df_p2 = temp_df[temp_df['Year_Num'] > cut_year]
+                                        df_p1 = temp_df[temp_df['Year_Numeric'] <= cut_year]
+                                        df_p2 = temp_df[temp_df['Year_Numeric'] > cut_year]
                                         
                                         themes_1 = extract_themes_for_period(df_p1)
                                         themes_2 = extract_themes_for_period(df_p2)
@@ -1887,51 +2063,7 @@ elif len(st.session_state.history) > 0:
                                 st.error(f"Gagal memproses matriks 3 dimensi: {e}")
 
                     # ===============================================
-                    # 5. TREND TOPICS (WORD DYNAMICS)
-                    # ===============================================
-                    with tab_trend:
-                        st.markdown("#### 📈 Dinamika Topik Tren (Trend Topics)")
-                        st.caption("Peta persebaran frekuensi kata kunci spesifik di sepanjang rentang waktu (tahun publikasi).")
-                        
-                        if not year_col:
-                            st.warning("Metadata Tahun Publikasi tidak ditemukan.")
-                        else:
-                            temp_trend = data[[year_col, net_col]].copy()
-                            temp_trend[year_col] = pd.to_numeric(temp_trend[year_col], errors='coerce')
-                            temp_trend = temp_trend.dropna()
-                            
-                            if actual_net_delim:
-                                temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().str.split(actual_net_delim)
-                            else:
-                                temp_trend['Words'] = temp_trend[net_col].astype(str).str.lower().apply(lambda x: [x])
-                            
-                            temp_trend = temp_trend.explode('Words')
-                            temp_trend['Words'] = temp_trend['Words'].str.strip()
-                            
-                            valid_mask = (temp_trend['Words'] != "") & (~temp_trend['Words'].isin(COMMON_STOPWORDS)) & (temp_trend['Words'].str.len() > 3) & (~temp_trend['Words'].isin(["tidak tersedia", "n/a", "no title"]))
-                            temp_trend = temp_trend[valid_mask]
-                            
-                            top_trend_words = temp_trend['Words'].value_counts().head(15).index.tolist()
-                            temp_trend = temp_trend[temp_trend['Words'].isin(top_trend_words)]
-                            
-                            trend_grouped = temp_trend.groupby([year_col, 'Words']).size().reset_index(name='Frequency')
-                            
-                            if not trend_grouped.empty:
-                                fig_trend = px.scatter(trend_grouped, x=year_col, y="Words", size="Frequency", color="Words",
-                                                     title="Rentang Hidup dan Puncak Topik Riset",
-                                                     labels={year_col: "Tahun Publikasi", "Words": "Kata Kunci Dominan"},
-                                                     size_max=35, height=650)
-                                
-                                fig_trend.update_layout(xaxis=dict(tickformat="d"), showlegend=False)
-                                for w in top_trend_words:
-                                    fig_trend.add_hline(y=w, line_width=0.5, line_color="lightgray", opacity=0.5)
-                                    
-                                st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                            else:
-                                st.info("Data dinamis tidak mencukupi untuk pemplotan waktu.")
-
-                    # ===============================================
-                    # 6. TABLES AND NODE CENTRALITY METRICS
+                    # 5. TABLES AND NODE CENTRALITY METRICS
                     # ===============================================
                     with tab_table:
                         st.markdown("#### Tabel Agregat Modularity")
@@ -2026,15 +2158,20 @@ elif len(st.session_state.history) > 0:
                 
                 corpus_texts = df_search['Search_Text'].tolist()
                 titles_list = data[title_col].fillna("Tanpa Judul").astype(str).tolist() if title_col else ["Tanpa Judul"] * len(corpus_texts)
-                years_list = data[year_col].fillna("N/A").astype(str).tolist() if year_col else ["N/A"] * len(corpus_texts)
+                
+                # Gunakan Year_Numeric untuk tahun yang valid
+                if 'Year_Numeric' in data.columns:
+                    years_list = data['Year_Numeric'].fillna("N/A").astype(str).tolist()
+                else:
+                    years_list = data[year_col].fillna("N/A").astype(str).tolist() if year_col else ["N/A"] * len(corpus_texts)
                 
                 # --- PERBAIKAN: PROFIL GLOBAL DIPERKAYA DENGAN DATA 'OVERVIEW & TRENDS' ---
                 total_rows = len(data)
                 col_names = ", ".join(data.columns)
                 
                 # Ekstrak rentang tahun
-                if year_col:
-                    valid_years = pd.to_numeric(data[year_col], errors='coerce').dropna()
+                if 'Year_Numeric' in data.columns:
+                    valid_years = data['Year_Numeric'].dropna()
                     year_info = f"{int(valid_years.min())} hingga {int(valid_years.max())}" if not valid_years.empty else "Tidak diketahui"
                 else:
                     year_info = "Tidak tersedia"
@@ -2065,8 +2202,8 @@ elif len(st.session_state.history) > 0:
                 [PROFIL GLOBAL DATASET & STATISTIK]
                 - Total Dokumen/Jurnal di database ini: {total_rows} dokumen.
                 - Rentang Tahun Publikasi: {year_info}
-                - 5 Penulis Paling Produktif: {top_authors}
-                - 5 Jurnal/Penerbit Teratas: {top_journals}
+                - 5 Penulis/Kreator Paling Produktif: {top_authors}
+                - 5 Kategori/Penerbit Teratas: {top_journals}
                 - 5 Dokumen dengan Sitasi Tertinggi (High-Impact):
                 {top_cited_papers}
                 """
