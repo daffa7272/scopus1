@@ -11,7 +11,7 @@ Versi Enterprise ini dilengkapi dengan:
 - Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
 - Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
 - Advanced Graph Topology (NetworkX & Pyvis)
-- Generative AI Integration (Mistral, Gemini)
+- Generative AI Integration (Mistral, Gemini, Groq)
 - Local Storage Persistence (Penyimpanan API & Konfigurasi)
 =============================================================================
 """
@@ -358,6 +358,24 @@ def stream_gemini(system_prompt: str, user_prompt: str, api_key: str, model: str
                     except: pass
     except Exception as e: yield f"❌ Terjadi kesalahan internal: {e}"
 
+def stream_groq(system_prompt: str, user_prompt: str, api_key: str, model: str):
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "temperature": 0.2, "stream": True}
+    try:
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, stream=True)
+        if response.status_code != 200: yield f"❌ Error Groq ({response.status_code}): {response.text}"; return
+        for line in response.iter_lines():
+            if line:
+                decoded_line = line.decode('utf-8')
+                if decoded_line.startswith('data: '):
+                    data_str = decoded_line[6:]
+                    if data_str.strip() == '[DONE]': break
+                    try:
+                        content = json.loads(data_str)['choices'][0]['delta'].get('content', '')
+                        if content: yield content 
+                    except json.JSONDecodeError: pass
+    except Exception as e: yield f"❌ Terjadi kesalahan internal: {e}"
+
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
 def call_mistral_sync(system_prompt: str, user_prompt: str, api_key: str, model: str) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -380,6 +398,16 @@ def call_gemini_sync(system_prompt: str, user_prompt: str, api_key: str, model: 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=None)
         if response.status_code == 200: return response.json()['candidates'][0]['content']['parts'][0]['text']
+        else: return f"Error: {response.text}"
+    except Exception as e: return f"Error: {e}"
+
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
+def call_groq_sync(system_prompt: str, user_prompt: str, api_key: str, model: str) -> str:
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}
+    try:
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=None)
+        if response.status_code == 200: return response.json()["choices"][0]["message"]["content"]
         else: return f"Error: {response.text}"
     except Exception as e: return f"Error: {e}"
 
@@ -770,7 +798,8 @@ with st.sidebar:
         SCOPUS_API_KEY = st.text_input("Scopus API Key", type="password", value=user_prefs.get("scopus_key", ""), placeholder="Masukkan key Scopus").strip()
         st.markdown("**AI Provider**")
         
-        providers = ["Mistral", "Google Gemini"]
+        # PENGATURAN AI PROVIDER DIPERBARUI DENGAN GROQ
+        providers = ["Mistral", "Google Gemini", "Groq"]
         default_prov = user_prefs.get("ai_provider", "Mistral")
         prov_idx = providers.index(default_prov) if default_prov in providers else 0
         AI_PROVIDER = st.selectbox("Pilih Penyedia:", providers, index=prov_idx, label_visibility="collapsed")
@@ -790,6 +819,14 @@ with st.sidebar:
             g_idx = gemini_models.index(g_def) if g_def in gemini_models else 0
             AI_MODEL = st.selectbox("Model:", gemini_models, index=g_idx)
             st.caption("✨ 'gemini-2.5-flash' = Sangat kencang.")
+            
+        elif AI_PROVIDER == "Groq":
+            AI_API_KEY = st.text_input("Groq API Key", type="password", value=user_prefs.get("groq_key", ""), placeholder="Masukkan key Groq").strip()
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b","groq/compound-mini"]
+            q_def = user_prefs.get("groq_model", "llama-3.1-8b-instant")
+            q_idx = groq_models.index(q_def) if q_def in groq_models else 0
+            AI_MODEL = st.selectbox("Model:", groq_models, index=q_idx)
+            st.caption("✨ 'llama-3.1-8b' = Super Cepat, 'llama-3.3-70b' = Sangat Cerdas.")
 
         if st.button("💾 Simpan Pengaturan", use_container_width=True):
             new_settings = user_prefs.copy()
@@ -801,6 +838,9 @@ with st.sidebar:
             elif AI_PROVIDER == "Google Gemini":
                 new_settings["gemini_key"] = AI_API_KEY
                 new_settings["gemini_model"] = AI_MODEL
+            elif AI_PROVIDER == "Groq":
+                new_settings["groq_key"] = AI_API_KEY
+                new_settings["groq_model"] = AI_MODEL
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
             
@@ -1406,8 +1446,11 @@ elif len(st.session_state.history) > 0:
                                         prompt_clusters = {f"Cluster_{idx}": items for idx, (key, items) in enumerate(valid_clusters.items())}
                                         sys_prompt_ai = """Anda adalah pakar data bibliometrik akademis. Evaluasi klaster kata berikut. Tentukan apakah bermakna sama. Output HARUS murni JSON valid: {"Cluster_X": {"gabung": true, "standar": "Nama Baku", "alasan": "Alasan"}}"""
                                         usr_prompt_ai = f"Data Klaster Input:\n{json.dumps(prompt_clusters, indent=2)}"
+                                        
+                                        # PERUBAHAN GROQ CALL
                                         if AI_PROVIDER == "Mistral": ai_response = call_mistral_sync(sys_prompt_ai, usr_prompt_ai, AI_API_KEY, AI_MODEL)
                                         elif AI_PROVIDER == "Google Gemini": ai_response = call_gemini_sync(sys_prompt_ai, usr_prompt_ai, AI_API_KEY, AI_MODEL)
+                                        elif AI_PROVIDER == "Groq": ai_response = call_groq_sync(sys_prompt_ai, usr_prompt_ai, AI_API_KEY, AI_MODEL)
                                             
                                         try:
                                             match = re.search(r'\{[\s\S]*\}', ai_response)
@@ -1608,10 +1651,13 @@ elif len(st.session_state.history) > 0:
                         
                         st.markdown(f"##### ⏳ Streaming Inference (Batch {chunk_no}/{total_chunks}) [Dokumen ke-{i+1} s/d {i+len(batch)}]...")
                         with st.container(border=True):
+                            # PERUBAHAN GROQ CALL
                             if AI_PROVIDER == "Mistral":
                                 result_text = st.write_stream(stream_mistral(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
                             elif AI_PROVIDER == "Google Gemini":
                                 result_text = st.write_stream(stream_gemini(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
+                            elif AI_PROVIDER == "Groq":
+                                result_text = st.write_stream(stream_groq(system_prompt, user_prompt, AI_API_KEY, AI_MODEL))
                             
                             if "❌ Error" not in result_text:
                                 full_report_text += f"\n\n=======================================\nSINTESIS BATCH {chunk_no} (DOKUMEN {i+1}-{i+len(batch)})\n=======================================\n" + result_text
@@ -2385,6 +2431,7 @@ ATURAN MUTLAK (ANTI-HALUSINASI):
 4. Jika Anda menemukan jawabannya di dalam referensi, selalu kutip dengan menyebutkan Judul Jurnalnya.
 5. Gunakan bahasa Indonesia yang baik, terstruktur (gunakan bullet points jika perlu), dan santai layaknya asisten profesional.
 """
+                            # PERUBAHAN GROQ CALL
                             if AI_PROVIDER == "Mistral":
                                 for chunk in stream_mistral(rag_system_prompt, user_chat_input, AI_API_KEY, AI_MODEL):
                                     if "❌ Error" in chunk:
@@ -2394,6 +2441,13 @@ ATURAN MUTLAK (ANTI-HALUSINASI):
                                     response_placeholder.markdown(full_chat_response + "▌")
                             elif AI_PROVIDER == "Google Gemini":
                                 for chunk in stream_gemini(rag_system_prompt, user_chat_input, AI_API_KEY, AI_MODEL):
+                                    if "❌ Error" in chunk:
+                                        full_chat_response = chunk
+                                        break
+                                    full_chat_response += chunk
+                                    response_placeholder.markdown(full_chat_response + "▌")
+                            elif AI_PROVIDER == "Groq":
+                                for chunk in stream_groq(rag_system_prompt, user_chat_input, AI_API_KEY, AI_MODEL):
                                     if "❌ Error" in chunk:
                                         full_chat_response = chunk
                                         break
