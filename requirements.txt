@@ -9,3 +9,4 @@ scikit-learn
 wordcloud
 matplotlib
 pyvis==0.3.2
+PyPDF2
