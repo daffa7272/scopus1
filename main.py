@@ -19,6 +19,7 @@ Versi Enterprise ini dilengkapi dengan:
 import os
 import streamlit as st
 import streamlit.components.v1 as components
+import PyPDF2
 import pandas as pd
 import requests
 import re
@@ -72,6 +73,13 @@ try:
 except ImportError:
     HAS_WORDCLOUD = False
     logging.warning("Modul WordCloud tidak terdeteksi.")
+
+try:
+    from matplotlib_venn import venn2
+    HAS_VENN = True
+except ImportError:
+    HAS_VENN = False
+    logging.warning("Modul matplotlib-venn tidak terdeteksi. Diagram irisan topik dinonaktifkan.")
 
 try:
     import networkx as nx
@@ -414,6 +422,93 @@ def call_groq_sync(system_prompt: str, user_prompt: str, api_key: str, model: st
 # ==============================
 # DATA WRANGLING & EXTRACTORS
 # ==============================
+@st.cache_data(show_spinner=False)
+def load_ipc_excel_database(file_path):
+    """
+    Membaca database IPC dari file Excel lokal dan mengubahnya menjadi Dictionary.
+    Sangat cepat dan akurat 100%.
+    """
+    ipc_dict = {}
+    try:
+        # Membaca file Excel
+        df = pd.read_excel(file_path)
+        
+        # Deteksi otomatis nama kolom (asumsi kolom pertama adalah Kode, kolom kedua adalah Deskripsi)
+        if len(df.columns) >= 2:
+            kode_col = df.columns[0]
+            desc_col = df.columns[1]
+            
+            # Konversi dataframe ke dictionary
+            # Gunakan str() untuk memastikan format teks, dan isi NaN dengan string kosong
+            for index, row in df.iterrows():
+                kode = str(row[kode_col]).strip().upper()
+                desc = str(row[desc_col]).strip()
+                if kode and kode != "NAN":
+                    ipc_dict[kode] = desc
+            return ipc_dict, f"✅ Sukses memuat **{len(ipc_dict)}** kode IPC dari database Excel!"
+        else:
+            return {}, "❌ File Excel harus memiliki minimal 2 kolom (Kode dan Deskripsi)."
+            
+    except Exception as e:
+        return {}, f"❌ Gagal memuat database Excel: {e}"
+
+def build_ipc_dict_with_ai(folder_path, selected_files, api_key, model, provider):
+    """
+    Ekstraksi IPC menggunakan AI hanya pada file PDF yang dipilih pengguna.
+    """
+    master_ipc_dict = {}
+    
+    if not selected_files:
+        return master_ipc_dict, "⚠️ Tidak ada file yang dipilih untuk diproses."
+
+    sys_prompt = """Anda adalah asisten ahli klasifikasi paten WIPO (IPC).
+Tugas Anda adalah mengekstrak SETIAP kode paten dan deskripsinya dari teks kotor yang diberikan.
+ATURAN MUTLAK:
+1. Pahami hierarki (Misal 'A01B' adalah kelas, '1/00' adalah grup).
+2. Output WAJIB murni format JSON tanpa kata-kata lain.
+3. Format output: {"KODE_LENGKAP": "Deskripsi Lengkap"}"""
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, file_name in enumerate(selected_files):
+        file_path = os.path.join(folder_path, file_name)
+        status_text.markdown(f"**⏳ AI sedang membaca:** `{file_name}`")
+        
+        try:
+            reader = PyPDF2.PdfReader(file_path)
+            # Membaca 5 halaman pertama untuk akurasi tinggi
+            for page in reader.pages[:5]:
+                raw_text = page.extract_text()
+                if not raw_text: continue
+                
+                user_prompt = f"Ekstrak teks ini ke JSON:\n\n{raw_text[:3000]}"
+                
+                # Memanggil sinkronisasi API berdasarkan provider yang aktif [cite: 2642]
+                if provider == "Mistral":
+                    ai_response = call_mistral_sync(sys_prompt, user_prompt, api_key, model)
+                elif provider == "Google Gemini":
+                    ai_response = call_gemini_sync(sys_prompt, user_prompt, api_key, model)
+                elif provider == "Groq":
+                    ai_response = call_groq_sync(sys_prompt, user_prompt, api_key, model)
+                
+                try:
+                    # Parsing hasil JSON dari AI
+                    match = re.search(r'\{[\s\S]*\}', ai_response)
+                    json_str = match.group(0) if match else ai_response
+                    master_ipc_dict.update(json.loads(json_str))
+                except:
+                    continue
+                    
+        except Exception as e:
+            st.error(f"Gagal memproses {file_name}: {e}")
+            
+        progress_bar.progress((idx + 1) / len(selected_files))
+
+    status_text.empty()
+    progress_bar.empty()
+    return master_ipc_dict, f"✅ Sukses mengekstrak {len(master_ipc_dict)} kode dari {len(selected_files)} file."
+
 def clean_scopus_data(raw_data: dict) -> pd.DataFrame:
     cleaned_list = []
     entries = raw_data.get('search-results', {}).get('entry', [])
@@ -787,6 +882,7 @@ with st.sidebar:
             "🧹 Data Cleaning",
             "🤖 AI Synthesis",
             "🕸️ Conceptual Structure",
+            "🌍 Komparasi Global vs Indonesia",
             "💬 AI Chatbot (RAG)",
             "📖 Library & Glossary"
         ]
@@ -822,7 +918,7 @@ with st.sidebar:
             
         elif AI_PROVIDER == "Groq":
             AI_API_KEY = st.text_input("Groq API Key", type="password", value=user_prefs.get("groq_key", ""), placeholder="Masukkan key Groq").strip()
-            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b","groq/compound-mini"]
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]
             q_def = user_prefs.get("groq_model", "llama-3.1-8b-instant")
             q_idx = groq_models.index(q_def) if q_def in groq_models else 0
             AI_MODEL = st.selectbox("Model:", groq_models, index=q_idx)
@@ -844,12 +940,16 @@ with st.sidebar:
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
             
-    with st.expander("🧰 WIPO Patent Tools", expanded=False):
+with st.sidebar:
+     with st.expander("🧰 WIPO IPC Excel Database", expanded=False):
+        # --- TAUTAN REFERENSI RESMI ---
         st.markdown("Akses cepat referensi paten internasional.")
         st.markdown("[🌐 **Buka Skema IPC WIPO (Tautan Eksternal)**](https://www.wipo.int/ipc/itos4ipc/ITSupport_and_download_area/20260101/pdf/scheme/full_ipc/en/index.html)")
         st.markdown("---")
-        st.markdown("**🔍 Kamus Kode Negara WIPO**")
-        wipo_query = st.text_input("Ketik 2 Huruf Kode:", max_chars=2, placeholder="Misal: US, EP, WO").strip().upper()
+
+        # --- BAGIAN 1: KAMUS KODE NEGARA WIPO ---
+        st.markdown("**🌍 Kamus Kode Negara WIPO**")
+        wipo_query = st.text_input("Ketik 2 Huruf Kode Negara:", max_chars=2, placeholder="Misal: US, EP, WO").strip().upper()
         if len(wipo_query) == 2:
             if wipo_query in WIPO_2_LETTER_TO_ISO3:
                 iso_code = WIPO_2_LETTER_TO_ISO3[wipo_query]
@@ -857,6 +957,62 @@ with st.sidebar:
                 st.success(f"✅ **{country_name}**")
             else:
                 st.error("❌ Kode Tidak Ditemukan")
+                
+        st.markdown("---")
+        
+        # --- BAGIAN 2: DATABASE EXCEL LOKAL ---
+        st.markdown("**📖 Database Kamus IPC (Excel)**")
+        st.caption("Baca database IPC langsung dari file Excel lokal untuk kecepatan dan akurasi 100%.")
+        
+        # Path folder tempat Anda menyimpan file Excel database
+        db_folder = st.text_input("Path Folder Database Excel:", value="./database")
+        
+        if os.path.exists(db_folder):
+            # Mencari file Excel di dalam folder
+            all_excels = [f for f in os.listdir(db_folder) if f.lower().endswith(('.xlsx', '.xls'))]
+            
+            if all_excels:
+                selected_excel = st.selectbox("Pilih File Database IPC:", options=all_excels)
+                excel_path = os.path.join(db_folder, selected_excel)
+                
+                if st.button("🚀 Muat Database IPC", use_container_width=True):
+                    with st.spinner("Memuat database ke dalam memori..."):
+                        hasil_dict, pesan = load_ipc_excel_database(excel_path)
+                        
+                        if hasil_dict:
+                            st.session_state.ipc_excel_dictionary = hasil_dict
+                            st.success(pesan)
+                        else:
+                            st.error(pesan)
+            else:
+                st.warning(f"Tidak ada file Excel (.xlsx/.xls) di folder '{db_folder}'.")
+        else:
+            st.error(f"Folder '{db_folder}' tidak ditemukan.")
+
+        # --- BAGIAN 3: PENCARIAN HASIL DATABASE ---
+        if 'ipc_excel_dictionary' in st.session_state and st.session_state.ipc_excel_dictionary:
+            st.markdown("---")
+            search_ipc = st.text_input("🔍 Cari Kode IPC atau Deskripsi (Misal: A01B atau Soil):").strip().upper()
+            
+            if search_ipc:
+                # Pencarian Fuzzy (mencari di Kode ATAU Deskripsi)
+                query_clean = search_ipc.replace(" ", "").replace("/", "")
+                match_results = {}
+                
+                for k, v in st.session_state.ipc_excel_dictionary.items():
+                    k_clean = k.replace(" ", "").replace("/", "").upper()
+                    v_upper = str(v).upper()
+                    
+                    if query_clean in k_clean or search_ipc in v_upper:
+                        match_results[k] = v
+                
+                if match_results:
+                    # Menampilkan SEMUA hasil tanpa batasan
+                    for k, v in match_results.items():
+                        st.info(f"**{k}**\n\n{v}")
+                    st.caption(f"Menampilkan total {len(match_results)} hasil.")
+                else:
+                    st.error("Pencarian tidak ditemukan dalam database.")
 
 # ==============================
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
@@ -936,13 +1092,39 @@ elif menu_selection == "📥 Data Acquisition":
 
     with col2:
         st.markdown("#### 📁 Opsi 2: Unggah File Lokal (Local Data)")
-        st.info("Bagi pengguna database lain (Web of Science, PubMed, WIPO Patents), Anda bisa mengunggah format .csv atau .json ke sini.")
-        uploaded_file = st.file_uploader("Pilih Berkas", type=["csv", "json"])
+        st.info("Bagi pengguna database lain (Web of Science, PubMed, WIPO Patents), Anda bisa mengunggah format .csv, .json, atau Excel ke sini.")
+        # 1. Tambahkan ekstensi xls dan xlsx ke dalam parameter type
+        uploaded_file = st.file_uploader("Pilih Berkas", type=["csv", "json", "xls", "xlsx"])
         
         if uploaded_file:
             if st.button("Proses File Unggahan", type="primary", use_container_width=True):
                 try:
-                    loaded_data = pd.read_json(uploaded_file) if uploaded_file.name.endswith(".json") else pd.read_csv(uploaded_file, encoding='utf-8')
+                    # 2. Perbarui logika pembacaan file berdasarkan ekstensinya
+                    if uploaded_file.name.endswith(".json"):
+                        loaded_data = pd.read_json(uploaded_file)
+                    elif uploaded_file.name.endswith((".xls", ".xlsx")):
+                        # 1. Intip 15 baris pertama tanpa menetapkan header
+                        df_peek = pd.read_excel(uploaded_file, header=None, nrows=15)
+                        header_idx = 0
+                        
+                        # 2. Loop untuk mencari baris mana yang merupakan Header asli
+                        for i, row in df_peek.iterrows():
+                            row_vals = [str(x).strip().lower() for x in row.values if pd.notna(x)]
+                            # Cek apakah baris ini mengandung nama kolom standar WIPO/Scopus
+                            if any(col in row_vals for col in ['application id', 'title', 'judul', 'document title', 'authors', 'penulis']):
+                                header_idx = i
+                                break
+                                
+                        # 3. Baca ulang file dengan index header yang tepat (Untuk WIPO biasanya terbaca di index 5 / Baris 6)
+                        loaded_data = pd.read_excel(uploaded_file, header=header_idx)
+                        st.toast(f"ℹ️ Header otomatis terdeteksi pada baris ke-{header_idx + 1}", icon="🤖")
+                    else:
+                        # Fallback ke CSV (juga ditambahkan logika skip-metadata jika diperlukan)
+                        try:
+                            loaded_data = pd.read_csv(uploaded_file, encoding='utf-8')
+                        except Exception:
+                            loaded_data = pd.read_csv(uploaded_file, encoding='latin1')
+                        
                     loaded_data = loaded_data.fillna("Tidak tersedia")
                     st.session_state.history = [loaded_data]
                     st.session_state.history_actions = [f"Data Awal ({uploaded_file.name})"]
@@ -1221,24 +1403,53 @@ elif len(st.session_state.history) > 0:
                             temp_df = temp_df.explode('Entitas')
                             temp_df['Entitas'] = temp_df['Entitas'].astype(str).str.strip().str.upper() # Upper case agar konsisten (baik IPC/Keyword)
                             
-                            # Pembersihan Entitas
+                           # Pembersihan Entitas
                             stop_upper = {w.upper() for w in COMMON_STOPWORDS}
                             valid_mask = (temp_df['Entitas'] != "") & (~temp_df['Entitas'].isin(stop_upper)) & (temp_df['Entitas'].str.len() > 1) & (~temp_df['Entitas'].isin(["TIDAK TERSEDIA", "N/A", "NO TITLE", "NAN"]))
                             temp_df = temp_df[valid_mask]
                             
-                            # Ambil top 10 entitas secara global
-                            top_entities = temp_df['Entitas'].value_counts().head(10).index.tolist()
-                            temp_df = temp_df[temp_df['Entitas'].isin(top_entities)]
+                            # 1. Hitung frekuensi total untuk setiap entitas
+                            entity_totals = temp_df['Entitas'].value_counts()
                             
-                            # Agregasi per tahun dan entitas
-                            trend_grouped = temp_df.groupby(['Year_Numeric', 'Entitas']).size().reset_index(name='Frekuensi')
+                            # 2. Agregasi FULL per tahun dan entitas (Untuk Data Tabel)
+                            full_trend_grouped = temp_df.groupby(['Year_Numeric', 'Entitas']).size().reset_index(name='Frekuensi')
                             
-                            if not trend_grouped.empty:
-                                fig_trend = px.line(trend_grouped, x='Year_Numeric', y='Frekuensi', color='Entitas', markers=True,
+                            if not full_trend_grouped.empty:
+                                # --- A. RENDER GRAFIK CHART (Hanya Top 10) ---
+                                top_entities = entity_totals.head(10).index.tolist()
+                                chart_data = full_trend_grouped[full_trend_grouped['Entitas'].isin(top_entities)]
+                                
+                                fig_trend = px.line(chart_data, x='Year_Numeric', y='Frekuensi', color='Entitas', markers=True,
                                                     title=f"Tren Top 10 '{trend_col}' Sepanjang Waktu",
                                                     labels={'Year_Numeric': 'Tahun', 'Frekuensi': 'Jumlah Kemunculan'})
                                 fig_trend.update_layout(xaxis=dict(dtick=1), margin=dict(l=0, r=0, t=40, b=0))
                                 st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
+                                
+                                # --- B. RENDER TABEL DISTRIBUSI (Seluruh Data) ---
+                                st.markdown("---")
+                                st.markdown(f"#### 🗃️ Tabel Distribusi Frekuensi Keseluruhan '{trend_col}'")
+                                st.caption(f"Menampilkan jumlah kemunculan seluruh **{len(entity_totals)}** variasi kata kunci/IPC per tahun.")
+                                
+                                # Pivot table agar Tahun menjadi kolom dan Entitas menjadi baris
+                                pivot_df = full_trend_grouped.pivot(index='Entitas', columns='Year_Numeric', values='Frekuensi').fillna(0).astype(int)
+                                
+                                # Tambahkan kolom Total Keseluruhan agar mudah disortir
+                                pivot_df['Total Keseluruhan'] = pivot_df.sum(axis=1)
+                                
+                                # Urutkan dari yang kemunculannya paling banyak
+                                pivot_df = pivot_df.sort_values(by='Total Keseluruhan', ascending=False)
+                                
+                                # Tampilkan Tabel Interaktif
+                                st.dataframe(pivot_df, use_container_width=True, height=350)
+                                
+                                # Tambahkan tombol Download khusus untuk tabel ini
+                                st.download_button(
+                                    label="📥 Unduh Seluruh Data Tabel (.csv)",
+                                    data=pivot_df.reset_index().to_csv(index=False).encode('utf-8'),
+                                    file_name=f"distribusi_{trend_col}_lengkap.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                             else:
                                 st.info("Data tidak mencukupi untuk visualisasi tren.")
 
@@ -2210,7 +2421,250 @@ elif len(st.session_state.history) > 0:
                         gc.collect()
 
     # ---------------------------------------------------------
-    # MENU 6: AI CHATBOT (STRICT RAG & MULTI-TEMPLATES)
+    # MENU 6: KOMPARASI GLOBAL VS INDONESIA
+    # ---------------------------------------------------------
+    elif menu_selection == "🌍 Komparasi Global vs Indonesia":
+        st.title("🌍 Komparasi Riset: Global vs Indonesia")
+        st.markdown("Fitur analitik khusus untuk menyandingkan performa, dampak sitasi, dan lanskap penelitian antara skala Global dengan Indonesia menggunakan data bibliometrik Anda.")
+        
+        geo_col_target = affiliation_col if affiliation_col else author_col
+        if not geo_col_target:
+            st.error("⚠️ Kolom afiliasi (Negara) atau Penulis tidak terdeteksi secara otomatis. Tidak dapat memisahkan asal publikasi.")
+        else:
+            with st.spinner("Memisahkan korpus data Global dan Indonesia..."):
+                # Deteksi Afiliasi Indonesia (Regex sederhana)
+                mask_indo = data[geo_col_target].astype(str).str.contains(r'\bIndonesia\b|\bIDN\b|\bID\b', case=False, na=False)
+                df_indo = data[mask_indo].copy()
+                df_global = data[~mask_indo].copy() # Data non-Indonesia untuk baseline
+                
+            if df_indo.empty:
+                st.warning("⚠️ Tidak ditemukan publikasi berafiliasi 'Indonesia' di dalam dataset ini. Pemetaan komparatif tidak dapat dijalankan.")
+            else:
+                st.success(f"✅ Klasifikasi Selesai: **{len(df_indo)}** Dokumen Riset Indonesia vs **{len(df_global)}** Dokumen Riset Global.")
+                
+                tab_metrics, tab_collab, tab_topic, tab_journal, tab_ai_comp = st.tabs([
+                    "📈 Pertumbuhan & Dampak", "🤝 Pemetaan Kolaborasi", "🎯 Analisis Topik (Venn)", "🏢 Kualitas Wadah Publikasi", "🧠 AI Strategic Advisor"
+                ])
+                
+                with tab_metrics:
+                    st.markdown("#### 1. Perbandingan Volume & Kualitas Dampak (Sitasi)")
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    
+                    col_m1.metric("🌐 Total Volume (Global)", f"{len(df_global)} Dokumen")
+                    col_m2.metric("🇮🇩 Total Volume (Indonesia)", f"{len(df_indo)} Dokumen")
+                    
+                    avg_cite_indo = 0
+                    avg_cite_global = 0
+                    if citation_col:
+                        df_indo[citation_col] = pd.to_numeric(df_indo[citation_col], errors='coerce').fillna(0)
+                        df_global[citation_col] = pd.to_numeric(df_global[citation_col], errors='coerce').fillna(0)
+                        
+                        avg_cite_indo = df_indo[citation_col].mean()
+                        avg_cite_global = df_global[citation_col].mean()
+                        
+                        col_m3.metric("📈 Rata-Rata Sitasi / Kualitas", 
+                                      f"ID: {round(avg_cite_indo, 1)} | GLB: {round(avg_cite_global, 1)}", 
+                                      delta=round(avg_cite_indo - avg_cite_global, 1), 
+                                      help="Rata-rata jumlah sitasi per dokumen (Field-Weighted Proxy)")
+                    
+                    st.markdown("---")
+                    st.markdown("#### 2. Analisis Tren Pertumbuhan (Base-100 Index Proxy CAGR)")
+                    st.caption("Membandingkan laju percepatan pertumbuhan jumlah publikasi, menstandarkan tahun awal masing-masing dengan nilai Indeks 100.")
+                    
+                    if 'Year_Numeric' in data.columns and not data['Year_Numeric'].isna().all():
+                        g_year = df_global['Year_Numeric'].value_counts().sort_index()
+                        i_year = df_indo['Year_Numeric'].value_counts().sort_index()
+                        
+                        if not g_year.empty and not i_year.empty:
+                            g_base = g_year.iloc[0]
+                            i_base = i_year.iloc[0]
+                            
+                            df_g_idx = pd.DataFrame({'Tahun': g_year.index, 'Indeks Pertumbuhan': (g_year.values / g_base) * 100, 'Wilayah': 'Global'})
+                            df_i_idx = pd.DataFrame({'Tahun': i_year.index, 'Indeks Pertumbuhan': (i_year.values / i_base) * 100, 'Wilayah': 'Indonesia'})
+                            
+                            df_growth = pd.concat([df_g_idx, df_i_idx])
+                            
+                            fig_growth = px.line(df_growth, x='Tahun', y='Indeks Pertumbuhan', color='Wilayah', markers=True,
+                                                 color_discrete_map={'Global': '#3498db', 'Indonesia': '#e74c3c'})
+                            fig_growth.update_layout(xaxis=dict(dtick=1))
+                            fig_growth.add_hline(y=100, line_dash="dash", line_color="gray", annotation_text="Base Index (100)")
+                            st.plotly_chart(fig_growth, use_container_width=True)
+                    else:
+                        st.warning("Data temporal (Tahun Publikasi) tidak mencukupi.")
+                    
+                   # --- TAB 2: KOLABORASI ---
+                with tab_collab:
+                    st.markdown("#### 🤝 Pemetaan Kolaborasi Internasional (International Co-authorship Rate)")
+                    st.caption("Seberapa terintegrasi periset Indonesia dengan jaringan sains global?")
+                    
+                    indo_collab_status = []
+                    partner_countries = []
+                    
+                    for text in df_indo[geo_col_target].dropna():
+                        countries = extract_countries_from_text(text)
+                        non_indo = [c for c in countries if c.lower() not in ['indonesia', 'idn']]
+                        if non_indo:
+                            indo_collab_status.append('Kolaborasi Internasional')
+                            partner_countries.extend(non_indo)
+                        else:
+                            indo_collab_status.append('Domestik (Hanya Indonesia)')
+                            
+                    if indo_collab_status:
+                        col_c1, col_c2 = st.columns(2)
+                        
+                        with col_c1:
+                            df_collab_ratio = pd.DataFrame({'Status': indo_collab_status})
+                            ratio_counts = df_collab_ratio['Status'].value_counts().reset_index()
+                            ratio_counts.columns = ['Status Kolaborasi', 'Jumlah']
+                            
+                            fig_pie = px.pie(ratio_counts, names='Status Kolaborasi', values='Jumlah', hole=0.4,
+                                             color='Status Kolaborasi', color_discrete_map={'Domestik (Hanya Indonesia)': '#95a5a6', 'Kolaborasi Internasional': '#2ecc71'})
+                            fig_pie.update_traces(textinfo='percent+label')
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                            
+                        with col_c2:
+                            if partner_countries:
+                                df_partners = pd.DataFrame(Counter(partner_countries).most_common(5), columns=['Negara Mitra', 'Jumlah Joint-Paper'])
+                                fig_bar_partner = px.bar(df_partners, y='Negara Mitra', x='Jumlah Joint-Paper', orientation='h')
+                                fig_bar_partner.update_layout(yaxis={'categoryorder':'total ascending'})
+                                fig_bar_partner.update_traces(marker_color='#f39c12')
+                                st.markdown("**Top 5 Negara Mitra Kolaborasi Indonesia**")
+                                st.plotly_chart(fig_bar_partner, use_container_width=True)
+                            else:
+                                st.info("Tidak ada data negara mitra kolaborasi yang terdeteksi.")
+
+                # --- TAB 3: IRISAN TOPIK (VENN) ---
+                with tab_topic:
+                    st.markdown("#### 🎯 Analisis Irisan Topik (Topic Overlap & Jaccard Similarity)")
+                    st.caption("Mendeteksi selaraskah fokus riset nasional dengan tren global, menggunakan Jaccard Index (Set Theory).")
+                    
+                    kw_candidates = [c for c in data.columns if 'keyword' in c.lower() or 'authkey' in c.lower() or 'index' in c.lower()]
+                    kw_col = kw_candidates[0] if kw_candidates else title_col
+                    
+                    if kw_col:
+                        def get_top_kws(df, col, n=10):
+                            kws = df[col].astype(str).str.lower().str.split(';').explode().str.strip()
+                            kws = kws[~kws.isin(COMMON_STOPWORDS) & (kws.str.len() > 3)]
+                            return kws.value_counts().head(n)
+
+                        top_100_g = set(get_top_kws(df_global, kw_col, 100).index)
+                        top_100_i = set(get_top_kws(df_indo, kw_col, 100).index)
+                        
+                        intersection = top_100_g.intersection(top_100_i)
+                        union = top_100_g.union(top_100_i)
+                        jaccard = len(intersection) / len(union) if len(union) > 0 else 0
+                        
+                        st.metric("🧬 Jaccard Similarity Index (Kesamaan Topik)", f"{round(jaccard * 100, 2)}%", help="100% berarti fokus riset sama persis. 0% berarti sangat terisolasi/berbeda sama sekali.")
+                        
+                        col_v1, col_v2 = st.columns([1, 1])
+                        with col_v1:
+                            if HAS_VENN:
+                                fig_venn, ax_venn = plt.subplots(figsize=(6, 4))
+                                v = venn2([top_100_g, top_100_i], set_labels=('Top 100 Global', 'Top 100 Indonesia'), ax=ax_venn)
+                                if v.get_patch_by_id('10'): v.get_patch_by_id('10').set_color('#3498db')
+                                if v.get_patch_by_id('01'): v.get_patch_by_id('01').set_color('#e74c3c')
+                                if v.get_patch_by_id('11'): v.get_patch_by_id('11').set_color('#9b59b6')
+                                st.pyplot(fig_venn)
+                            else:
+                                st.warning("Modul `matplotlib-venn` tidak terinstal. Tampilan grafik Venn dilewati.")
+                                st.info(f"Topik Irisan: {len(intersection)} | Murni Global: {len(top_100_g - intersection)} | Murni Indo: {len(top_100_i - intersection)}")
+                        
+                        with col_v2:
+                            st.markdown("**🔍 Topik Frontier (Hanya Diteliti Global):**")
+                            st.caption(", ".join(list(top_100_g - intersection)[:15]) + "...")
+                            st.markdown("**🌴 Topik Endemik (Hanya Diteliti Indonesia):**")
+                            st.caption(", ".join(list(top_100_i - intersection)[:15]) + "...")
+                            st.markdown("**🤝 Topik Selaras (Shared Overlap):**")
+                            st.caption(", ".join(list(intersection)[:15]) + "...")
+
+                # --- TAB 4: KUALITAS WADAH (JURNAL) ---
+                with tab_journal:
+                    st.markdown("#### 🏢 Pemetaan Kualitas Wadah Publikasi (Journal Distribution)")
+                    if journal_col:
+                        col_j1, col_j2 = st.columns(2)
+                        with col_j1:
+                            st.markdown("**🌐 Top 5 Jurnal Publikasi Global**")
+                            top_j_g = df_global[journal_col].value_counts().head(5).reset_index()
+                            top_j_g.columns = ['Jurnal Target', 'Total']
+                            st.dataframe(top_j_g, use_container_width=True)
+                        with col_j2:
+                            st.markdown("**🇮🇩 Top 5 Jurnal Publikasi Indonesia**")
+                            top_j_i = df_indo[journal_col].value_counts().head(5).reset_index()
+                            top_j_i.columns = ['Jurnal Target', 'Total']
+                            st.dataframe(top_j_i, use_container_width=True)
+                    else:
+                        st.warning("Metadata nama Jurnal/Sumber tidak tersedia.")
+
+                # --- TAB 5: AI ADVISOR ---
+                with tab_ai_comp:
+                    st.markdown("#### 🧠 Syntesis Strategis AI (Gap Analysis & Policy Recommendation)")
+                    st.info("AI akan bertindak sebagai **Strategic Policy Advisor**, mengevaluasi kesenjangan topik riset, kolaborasi, dan memberi rekomendasi pendanaan/kebijakan untuk mengejar megatrend global.")
+                    
+                    if st.button("🚀 Rumuskan Laporan Kebijakan AI", type="primary"):
+                        if not AI_API_KEY:
+                            st.error(f"⚠️ {AI_PROVIDER} API Key belum disetel. Harap atur di menu Setelan Sidebar.")
+                        else:
+                            with st.spinner(f"Menyusun evaluasi strategis menggunakan {AI_MODEL}..."):
+                                # Ekstraksi Abstrak (Teknologi)
+                                tech_g, tech_i = "N/A", "N/A"
+                                if abstract_col:
+                                    tech_g = ", ".join(get_top_kws(df_global, abstract_col, 20).index.tolist())
+                                    tech_i = ", ".join(get_top_kws(df_indo, abstract_col, 20).index.tolist())
+
+                                top_g_str = ", ".join(list(top_100_g)[:15]) if kw_col else "N/A"
+                                top_i_str = ", ".join(list(top_100_i)[:15]) if kw_col else "N/A"
+                                overlap_str = str(round(jaccard * 100, 2)) + "%" if kw_col else "N/A"
+                                
+                                collab_rate = round((ratio_counts[ratio_counts['Status Kolaborasi'] == 'Kolaborasi Internasional']['Jumlah'].values[0] / len(df_indo)) * 100, 2) if 'Kolaborasi Internasional' in ratio_counts['Status Kolaborasi'].values else 0
+                                
+                                prompt_sys = """Anda adalah 'Strategic Research Policy Advisor' & Pakar Bibliometrik level Kementerian/CSIRO. 
+Buat Laporan Evaluasi Kebijakan Riset komprehensif yang membandingkan performa riset Indonesia dengan lanskap Global.
+
+Gunakan Format Analisis ini:
+1. **Analisis Produktivitas & Dampak (Impact)**: Evaluasi perbedaan rata-rata sitasi dan indikasi kualitas wadah publikasi.
+2. **Kesehatan Kolaborasi Internasional**: Berdasarkan persentase kolaborasi Indonesia, apakah riset kita cukup terintegrasi dengan jaringan global?
+3. **Kesenjangan Topik & Adopsi Teknologi (Gap Analysis)**: Berdasarkan data irisan topik dan terminologi ABSTRAK, sebutkan teknologi apa yang 'lagging' (hanya ada di Global) dan apa yang jadi fokus 'endemik' Indonesia.
+4. **Rekomendasi Kebijakan Strategis**: Berikan 3 poin rekomendasi konkret (misal: strategi pendanaan, prioritas riset) untuk mengejar ketertinggalan megatrend global.
+
+Gunakan Bahasa Indonesia formal akademis tinggi. Analisis HANYA berdasarkan data konkret di bawah ini."""
+
+                                prompt_user = f"""
+[DATA METRIK KOMPARATIF]
+- Volume: Indonesia ({len(df_indo)} dok), Global ({len(df_global)} dok)
+- Sitasi Rata-rata per Dokumen: Indonesia ({round(avg_cite_indo,2)}), Global ({round(avg_cite_global,2)})
+- Tingkat Kolaborasi Internasional Peneliti Indonesia: {collab_rate}%
+- Kesamaan Fokus Riset (Jaccard Topic Overlap): {overlap_str}
+- Topik/Keyword Riset Indonesia: {top_i_str}
+- Topik/Keyword Riset Global: {top_g_str}
+- Tren Terminologi Teknologi di Abstrak Indonesia: {tech_i}
+- Tren Terminologi Teknologi di Abstrak Global: {tech_g}
+
+Buat laporan analisis strategis sekarang!"""
+                                
+                                response_placeholder = st.empty()
+                                full_resp = ""
+                                
+                                if AI_PROVIDER == "Mistral":
+                                    for chunk in stream_mistral(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                        full_resp += chunk
+                                        response_placeholder.markdown(full_resp + "▌")
+                                elif AI_PROVIDER == "Google Gemini":
+                                    for chunk in stream_gemini(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                        full_resp += chunk
+                                        response_placeholder.markdown(full_resp + "▌")
+                                elif AI_PROVIDER == "Groq":
+                                    for chunk in stream_groq(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                        full_resp += chunk
+                                        response_placeholder.markdown(full_resp + "▌")
+                                
+                                response_placeholder.markdown(full_resp)
+                                st.download_button("📥 Unduh Policy Brief (.txt)", full_resp, file_name="AI_Policy_Brief_Indo_vs_Global.txt")
+
+    # ---------------------------------------------------------
+    # MENU 7: AI CHATBOT (STRICT RAG & MULTI-TEMPLATES)
     # ---------------------------------------------------------
     elif menu_selection == "💬 AI Chatbot (RAG)":
         st.title("💬 Interactive AI Research Assistant (Strict RAG)")
