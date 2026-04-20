@@ -10,3 +10,6 @@ wordcloud
 matplotlib
 pyvis==0.3.2
 PyPDF2
+openpyxl
+xlrd
+xlsxwriter
