@@ -34,6 +34,7 @@ import gc  # Modul Garbage Collector untuk optimalisasi RAM
 from collections import Counter, defaultdict
 import io
 import xml.etree.ElementTree as ET # Modul GEXF Export
+from google.cloud import bigquery
 
 # Konfigurasi Logging Dasar
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -61,7 +62,7 @@ def save_settings(settings_dict):
             json.dump(settings_dict, f, indent=4)
     except Exception as e:
         logging.error(f"Gagal menyimpan settings: {e}")
-
+        
 # ==============================
 # DEPENDENSI & EKSTENSI LANJUTAN
 # ==============================
@@ -422,6 +423,7 @@ def call_groq_sync(system_prompt: str, user_prompt: str, api_key: str, model: st
 # ==============================
 # DATA WRANGLING & EXTRACTORS
 # ==============================
+
 @st.cache_data(show_spinner=False)
 def load_ipc_excel_database(file_path):
     """
@@ -451,6 +453,30 @@ def load_ipc_excel_database(file_path):
             
     except Exception as e:
         return {}, f"❌ Gagal memuat database Excel: {e}"
+    
+def load_data_from_bigquery(project_id, sql_query, credentials_info=None):
+    """
+    Menjalankan query di BigQuery dan mengembalikan hasilnya.
+    Sangat cocok untuk push-down computation.
+    """
+    try:
+        from google.cloud import bigquery
+        
+        if credentials_info:
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            client = bigquery.Client(credentials=credentials, project=project_id)
+        else:
+            client = bigquery.Client(project=project_id)
+            
+        query_job = client.query(sql_query)
+        df = query_job.to_dataframe()
+        
+        if df.empty:
+            return None, "⚠️ Query berhasil tetapi tidak ada data yang ditemukan."
+        return df, f"✅ Berhasil memproses data dari BigQuery (Menghasilkan {len(df)} baris agregasi)."
+    except Exception as e:
+        return None, f"❌ Error BigQuery: {str(e)}"
 
 def build_ipc_dict_with_ai(folder_path, selected_files, api_key, model, provider):
     """
@@ -894,7 +920,6 @@ with st.sidebar:
         SCOPUS_API_KEY = st.text_input("Scopus API Key", type="password", value=user_prefs.get("scopus_key", ""), placeholder="Masukkan key Scopus").strip()
         st.markdown("**AI Provider**")
         
-        # PENGATURAN AI PROVIDER DIPERBARUI DENGAN GROQ
         providers = ["Mistral", "Google Gemini", "Groq"]
         default_prov = user_prefs.get("ai_provider", "Mistral")
         prov_idx = providers.index(default_prov) if default_prov in providers else 0
@@ -906,7 +931,6 @@ with st.sidebar:
             m_def = user_prefs.get("mistral_model", "mistral-small-latest")
             m_idx = mistral_models.index(m_def) if m_def in mistral_models else 0
             AI_MODEL = st.selectbox("Model:", mistral_models, index=m_idx)
-            st.caption("✨ 'mistral-small' = Cepat & Hemat Token.")
             
         elif AI_PROVIDER == "Google Gemini":
             AI_API_KEY = st.text_input("Gemini API Key", type="password", value=user_prefs.get("gemini_key", ""), placeholder="Masukkan key Gemini").strip()
@@ -914,7 +938,6 @@ with st.sidebar:
             g_def = user_prefs.get("gemini_model", "gemini-2.5-flash")
             g_idx = gemini_models.index(g_def) if g_def in gemini_models else 0
             AI_MODEL = st.selectbox("Model:", gemini_models, index=g_idx)
-            st.caption("✨ 'gemini-2.5-flash' = Sangat kencang.")
             
         elif AI_PROVIDER == "Groq":
             AI_API_KEY = st.text_input("Groq API Key", type="password", value=user_prefs.get("groq_key", ""), placeholder="Masukkan key Groq").strip()
@@ -922,7 +945,24 @@ with st.sidebar:
             q_def = user_prefs.get("groq_model", "llama-3.1-8b-instant")
             q_idx = groq_models.index(q_def) if q_def in groq_models else 0
             AI_MODEL = st.selectbox("Model:", groq_models, index=q_idx)
-            st.caption("✨ 'llama-3.1-8b' = Super Cepat, 'llama-3.3-70b' = Sangat Cerdas.")
+
+        st.markdown("---")
+        st.markdown("**Google BigQuery Credentials**")
+        BQ_PROJECT_ID = st.text_input("Default Project ID", value=user_prefs.get("bq_project", ""), placeholder="Masukkan Project ID Google Cloud Anda").strip()
+        
+        # Fitur khusus: Membaca dan menyimpan string JSON Service Account ke file lokal
+        st.caption("Service Account Key (Opsional, tinggalkan kosong jika menggunakan Default Credentials)")
+        bq_json_upload = st.file_uploader("Unggah JSON untuk Disimpan:", type=["json"])
+        
+        # Ambil state JSON yang sudah tersimpan sebelumnya (jika ada)
+        saved_bq_json_str = user_prefs.get("bq_json_str", "")
+        if saved_bq_json_str:
+            st.success("✅ Kredensial JSON telah tersimpan di sistem lokal.")
+            if st.button("🗑️ Hapus Kredensial Tersimpan"):
+                new_settings = user_prefs.copy()
+                new_settings["bq_json_str"] = ""
+                save_settings(new_settings)
+                st.rerun()
 
         if st.button("💾 Simpan Pengaturan", use_container_width=True):
             new_settings = user_prefs.copy()
@@ -937,8 +977,21 @@ with st.sidebar:
             elif AI_PROVIDER == "Groq":
                 new_settings["groq_key"] = AI_API_KEY
                 new_settings["groq_model"] = AI_MODEL
+            
+            # --- Simpan Pengaturan BigQuery ---
+            new_settings["bq_project"] = BQ_PROJECT_ID
+            
+            # Jika user mengunggah file baru, simpan isi file tersebut sebagai string ke settings.json
+            if bq_json_upload is not None:
+                try:
+                    json_content = json.load(bq_json_upload)
+                    new_settings["bq_json_str"] = json.dumps(json_content) # Simpan sebagai string di local storage
+                except Exception as e:
+                    st.error(f"Gagal membaca file JSON: {e}")
+            
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
+            st.rerun() # Refresh agar state tersimpan terlihat
             
 with st.sidebar:
      with st.expander("🧰 WIPO IPC Excel Database", expanded=False):
@@ -1135,6 +1188,83 @@ elif menu_selection == "📥 Data Acquisition":
                     st.success(f"✅ Memuat {len(loaded_data)} baris data! Silakan pilih menu di Sidebar untuk melanjutkan.")
                 except Exception as e: 
                     st.error(f"❌ Gagal memproses file: Kesalahan Parsing -> {e}")
+    st.markdown("---")
+    st.markdown("#### 🗄️ Opsi 3: BigQuery (Massive Data)")
+    st.info("Cocok untuk menganalisis jutaan entri data publik/privat secara langsung.")
+    
+    with st.expander("Konfigurasi Koneksi BigQuery", expanded=False):
+        # Ambil Project ID dari pengaturan lokal
+        bq_project = st.text_input("Google Cloud Project ID:", value=user_prefs.get("bq_project", ""), placeholder="id-proyek-anda")
+        
+        # Pilihan Mode Query
+        bq_mode = st.radio("Mode Analisis:", ["Preview Data (Limit)", "Push-Down Agregasi"])
+        
+        if bq_mode == "Preview Data (Limit)":
+            st.caption("Peringatan: Gunakan LIMIT agar Streamlit tidak crash.")
+            default_query = "SELECT * FROM `bigquery-public-data.breathe.epo_patents` LIMIT 1000"
+        else:
+            st.caption("BigQuery akan memproses jutaan baris, Streamlit hanya menerima hasil ringkasannya.")
+            default_query = """SELECT 
+  EXTRACT(YEAR FROM publication_date) as publication_year,
+  COUNT(publication_number) as total_patents
+FROM `bigquery-public-data.breathe.epo_patents`
+GROUP BY publication_year
+ORDER BY publication_year DESC"""
+            
+        bq_query = st.text_area("SQL Query:", value=default_query, height=150)
+        
+        # Cek apakah kredensial JSON sudah tersimpan di sistem
+        saved_json_str = user_prefs.get("bq_json_str", "")
+        if saved_json_str:
+            st.success("✅ Menggunakan Kredensial JSON dari Pengaturan Lokal.")
+            bq_json = None # Tidak perlu upload ulang
+        else:
+            st.caption("Autentikasi (Service Account JSON)")
+            bq_json = st.file_uploader("Unggah Service Account Key (JSON) Sementara:", type=["json"], key="bq_auth_temp")
+            st.warning("⚠️ Tips: Simpan JSON Anda secara permanen melalui menu '⚙️ Settings & API Keys' di sidebar atas.")
+        
+        if st.button("🚀 Jalankan Query di BigQuery", type="primary", use_container_width=True):
+            if not bq_project or not bq_query:
+                st.warning("Mohon isi Project ID dan SQL Query.")
+            else:
+                with st.spinner("Memerintahkan BigQuery untuk menghitung data..."):
+                    creds = None
+                    
+                    # Logika Penentuan Kredensial:
+                    # 1. Prioritaskan JSON yang tersimpan di sistem lokal
+                    # 2. Jika tidak ada, gunakan yang baru saja diunggah secara sementara
+                    if saved_json_str:
+                        try:
+                            creds = json.loads(saved_json_str)
+                        except json.JSONDecodeError:
+                            st.error("Format JSON tersimpan rusak.")
+                    elif bq_json:
+                        creds = json.load(bq_json)
+                    
+                    df_bq, message = load_data_from_bigquery(bq_project, bq_query, creds)
+                    
+                    if df_bq is not None:
+                        # --- TAMBAHAN: SIMPAN DATA KE MEMORI UTAMA SISTEM ---
+                        if bq_mode == "Preview Data (Limit)":
+                            df_bq_clean = df_bq.fillna("Tidak tersedia")
+                            st.session_state.history = [df_bq_clean]
+                            st.session_state.history_actions = [f"Data Awal (BigQuery: {bq_project})"]
+                            st.session_state.current_step = 0
+                            st.session_state.preview_action = None
+                            st.session_state.map_rendered = False
+                        # ----------------------------------------------------
+
+                        st.success(message)
+                        st.dataframe(df_bq, use_container_width=True)
+                        
+                        if bq_mode == "Push-Down Agregasi" and len(df_bq.columns) >= 2:
+                            st.markdown("##### Visualisasi Hasil Agregasi BigQuery")
+                            x_col = df_bq.columns[0]
+                            y_col = df_bq.columns[1]
+                            fig_bq = px.bar(df_bq, x=x_col, y=y_col)
+                            st.plotly_chart(fig_bq, use_container_width=True)
+                    else:
+                        st.error(message)
 
 # ==============================
 # MENU-MENU ANALISIS (WAJIB ADA DATA)
@@ -1830,19 +1960,21 @@ elif len(st.session_state.history) > 0:
                     
                     for i in range(min(num_samples, len(ai_data))):
                         doc_text = str(ai_data[target_col].iloc[i])
-                        # Potong panjang abstrak max 1500 char untuk hemat token API
+                        # Potong panjang narasi max 1500 char untuk hemat token API
                         doc_text_safe = doc_text[:1500] + "..." if len(doc_text) > 1500 else doc_text
 
                         if title_col:
                             doc_title = str(ai_data[title_col].iloc[i])
                             sampled_titles.append(f"**[{i+1}]** {doc_title}")
-                            docs_to_process.append(f"Dokumen {i+1} [TI: {doc_title}]:\n{doc_text_safe}\n\n")
+                            # --- PERUBAHAN: Menyisipkan label target_col agar AI tahu konteks teksnya ---
+                            docs_to_process.append(f"Dokumen {i+1} [Judul: {doc_title}]\n[{target_col}]: {doc_text_safe}\n\n")
                         else:
                             sampled_titles.append(f"**[{i+1}]** (Metadata Judul tidak direferensikan)")
-                            docs_to_process.append(f"Dokumen {i+1}:\n{doc_text_safe}\n\n")
+                            docs_to_process.append(f"Dokumen {i+1}:\n[{target_col}]: {doc_text_safe}\n\n")
 
-                    task_to_send = custom_prompt if analysis_task == "Tanya Bebas (Custom Prompt)" else analysis_task
-                    system_prompt = f"Anda adalah Profesor dan Analis Riset Akademik Senior. Lakukan insturksi berikut terhadap batch dokumen ini: {task_to_send}\nATURAN KETAT: 1. Selalu referensikan dokumen dengan 'Judul Asli' miliknya. 2. JANGAN mengubah/menerjemahkan frasa 'Judul Asli'. 3. Keluaran harus menggunakan kaidah Bahasa Indonesia yang tinggi, tertata, dan saintifik."
+                    task_to_send = custom_prompt if analysis_task == "Tanya Bebas (Custom Master Prompt)" else analysis_task
+                    # --- PERUBAHAN: Mempertegas instruksi AI untuk fokus pada kolom yang dipilih ---
+                    system_prompt = f"Anda adalah Profesor dan Analis Riset Akademik Senior. Lakukan instruksi berikut terhadap batch dokumen ini: {task_to_send}\nFokuskan analisis Anda secara spesifik pada data dari kolom '{target_col}' yang dilampirkan.\nATURAN KETAT: 1. Selalu referensikan dokumen dengan 'Judul Asli' miliknya (jika ada). 2. JANGAN mengubah/menerjemahkan frasa 'Judul Asli'. 3. Keluaran harus menggunakan kaidah Bahasa Indonesia yang tinggi, tertata, dan saintifik."
 
                     st.markdown("---")
                     st.markdown(f"### 📝 Output Laporan Dinamis ({AI_PROVIDER})")
@@ -2029,21 +2161,44 @@ elif len(st.session_state.history) > 0:
                     # ===============================================
                     # 1. NETWORK MAP RENDERER (INTERAKTIF DENGAN PYVIS)
                     # ===============================================
+                    
+                   # ===============================================
+                    # 1. NETWORK MAP RENDERER (INTERAKTIF DENGAN PYVIS)
+                    # ===============================================
                     with tab_net:
                         if len(G_final_net.nodes()) == 0:
                             st.warning("Jaringan kosong. Silakan kurangi 'Minimum Number of Edges' atau tambah 'Number of Nodes' pada Pengaturan Network.")
                         else:
                             st.caption("Visualisasi interaktif graf berbasis fisika dinamis (Scroll/Drag untuk interaksi).")
                             
+                            # --- FITUR BARU: EGO-NETWORK FILTER ---
+                            st.markdown("#### 🎯 Filter Ego-Network (Isolasi Simpul)")
+                            st.info("Pilih satu entitas spesifik untuk melihat ekosistem terdekatnya secara eksklusif (1st-degree connections).")
+                            
+                            all_nodes = sorted(list(G_final_net.nodes()))
+                            ego_target = st.selectbox("Pilih Simpul Fokus (Ego):", ["-- Tampilkan Semua Jaringan --"] + all_nodes)
+                            
+                            # Logika Pemotongan Graph berdasarkan Ego
+                            if ego_target != "-- Tampilkan Semua Jaringan --":
+                                neighbors = list(G_final_net.neighbors(ego_target))
+                                nodes_to_keep = neighbors + [ego_target]
+                                # Potong grafik hanya menyisakan node ego dan tetangganya
+                                G_render = G_final_net.subgraph(nodes_to_keep).copy()
+                                st.success(f"🔍 Fokus pada '{ego_target}'. Ditemukan {len(neighbors)} relasi/topik yang terkoneksi langsung.")
+                            else:
+                                # Jika tidak ada yang dipilih, tampilkan semua
+                                G_render = G_final_net.copy()
+                            # --------------------------------------
+
                             col_dl1, col_dl2 = st.columns([4, 1])
                             with col_dl2:
-                                gexf_str = generate_gexf_string(G_final_net)
+                                # Pastikan export GEXF juga mengikuti grafik yang sedang di-filter (G_render)
+                                gexf_str = generate_gexf_string(G_render)
                                 st.download_button(label="📥 Export to Gephi (.gexf)", data=gexf_str, file_name="network_graph.gexf", mime="application/xml")
 
                             if HAS_PYVIS:
                                 # Rendering interaktif dengan Pyvis
                                 net = Network(height="650px", width="100%", bgcolor="#ffffff", font_color="black", notebook=False)
-                                
                                 color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
                                 
                                 word_avg_years = {}
@@ -2051,12 +2206,11 @@ elif len(st.session_state.history) > 0:
                                     word_years = defaultdict(list)
                                     for idx_df, row in df_mapped_net.iterrows():
                                         try:
-                                            # Robust year lookup
                                             yr_val = data.iloc[idx_df]['Year_Numeric']
                                             if not pd.isna(yr_val):
                                                 yr = int(yr_val)
                                                 for w in row[net_col]:
-                                                    if w in G_final_net.nodes():
+                                                    if w in G_render.nodes():
                                                         word_years[w].append(yr)
                                         except: pass
                                     word_avg_years = {w: np.mean(yrs) for w, yrs in word_years.items() if yrs}
@@ -2071,12 +2225,12 @@ elif len(st.session_state.history) > 0:
                                 for idx, comm in enumerate(communities_net):
                                     for node in comm: node_to_comm_net[node] = idx
 
-                                for node in G_final_net.nodes():
-                                    freq = G_final_net.nodes[node]['freq']
-                                    degree_count = G_final_net.degree(node) # Menghitung total keterhubungan edges node ini
+                                # PERUBAHAN PENTING: Gunakan G_render.nodes() bukan G_final_net.nodes()
+                                for node in G_render.nodes():
+                                    freq = G_render.nodes[node]['freq']
+                                    degree_count = G_render.degree(node)
                                     n_size = min(max(freq * 1.5, 15), 65)
                                     
-                                    # Styling Text Label dengan Outline Putih agar sangat jelas terbaca
                                     font_size = min(max(10 + freq * 0.5, 12), 35)
                                     font_config = {
                                         'size': font_size,
@@ -2098,14 +2252,14 @@ elif len(st.session_state.history) > 0:
                                         
                                     net.add_node(node, label=node, title=n_title, color=hex_color, size=n_size, font=font_config)
                                 
-                                for u, v, d in G_final_net.edges(data=True):
+                                # PERUBAHAN PENTING: Gunakan G_render.edges() bukan G_final_net.edges()
+                                for u, v, d in G_render.edges(data=True):
                                     edge_weight = d.get('weight', 1)
                                     net.add_edge(u, v, value=edge_weight, title=f"Kekuatan Relasi: {round(edge_weight, 3)}")
                                     
                                 net.repulsion(node_distance=150, spring_length=200)
                                 
                                 try:
-                                    # MENGGUNAKAN TEMPFILE UNTUK MENCEGAH RACE CONDITION MULTI-USER
                                     with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
                                         net.save_graph(tmp_file.name)
                                         with open(tmp_file.name, 'r', encoding='utf-8') as HtmlFile:
@@ -2114,7 +2268,64 @@ elif len(st.session_state.history) > 0:
                                 except Exception as e:
                                     st.error(f"Gagal merender interaktivitas graf Pyvis: {e}")
                             else:
-                                st.warning("Modul Pyvis tidak terinstal. Tampilan grafik Plotly kaku dimatikan. Silakan install Pyvis via terminal untuk fitur ini.")
+                                st.warning("Modul Pyvis tidak terinstal. Tampilan grafik interaktif dimatikan. Silakan install Pyvis via terminal untuk fitur ini.")
+                            
+                            # ========================================================
+                            # --- KOMPONEN BARU: AI TOPOLOGIST INTERPRETER ---
+                            # ========================================================
+                            st.markdown("---")
+                            st.markdown("### 🤖 AI Topologist Interpreter")
+                            st.caption("Berikan data matematis grafik ini kepada AI untuk mendapatkan narasi analisis struktur jaringan secara otomatis.")
+
+                            if st.button("🚀 Jalankan Analisis Struktur Jaringan (AI)", use_container_width=True):
+                                if not AI_API_KEY:
+                                    st.error(f"⚠️ API Key {AI_PROVIDER} belum disetel di sidebar!")
+                                else:
+                                    with st.spinner("AI sedang menelaah topologi dan hubungan antar konsep..."):
+                                        try:
+                                            import networkx as nx
+                                            target_g = G_render if 'G_render' in locals() else G_final_net
+                                            
+                                            deg_cent = nx.degree_centrality(target_g)
+                                            top_nodes = sorted(deg_cent.items(), key=lambda x: x[1], reverse=True)[:15]
+                                            nodes_summary = ", ".join([f"{node} (Score: {round(val, 3)})" for node, val in top_nodes])
+                                            
+                                            strong_edges = sorted(target_g.edges(data=True), key=lambda x: x[2].get('weight', 0), reverse=True)[:10]
+                                            edges_list = [f"[{u} + {v}] (Kekuatan: {round(d.get('weight', 0), 4)})" for u, v, d in strong_edges]
+                                            edges_summary = "\n".join(edges_list)
+                                            
+                                            prompt_sys = """Anda adalah Ahli Analisis Jaringan (Network Scientist) dan Analis Tren Riset Global.
+Tugas Anda adalah membaca data topologi jaringan kookurensi kata kunci dan memberikan interpretasi strategis.
+Gunakan bahasa Indonesia formal yang tajam dan berwawasan akademik tinggi."""
+                                            
+                                            prompt_user = f"""
+[DATA TOPOLOGI JARINGAN RISET]
+
+1. KONSEP PALING SENTRAL (Degree Centrality):
+{nodes_summary}
+
+2. RELASI PALING KUAT (Co-occurrence Weights):
+{edges_summary}
+
+Berdasarkan data di atas, berikan laporan singkat berisi:
+- **The Core Landscape**: Apa narasi utama atau 'jantung' dari bidang riset ini?
+- **Interdisciplinary Bridges**: Apakah ada konsep yang bertindak sebagai jembatan antara dua topik berbeda?
+- **Research Gaps & Opportunities**: Berdasarkan kekuatan hubungan yang ada, di mana area yang masih jarang disentuh namun memiliki potensi besar?
+"""
+                                            
+                                            if AI_PROVIDER == "Mistral":
+                                                hasil_interpretasi = call_mistral_sync(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL)
+                                            elif AI_PROVIDER == "Google Gemini":
+                                                hasil_interpretasi = call_gemini_sync(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL)
+                                            elif AI_PROVIDER == "Groq":
+                                                hasil_interpretasi = call_groq_sync(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL)
+                                            
+                                            st.success("✅ Analisis Topologi Selesai!")
+                                            with st.container(border=True):
+                                                st.markdown(hasil_interpretasi)
+                                                
+                                        except Exception as e:
+                                            st.error(f"Gagal melakukan interpretasi: {str(e)}")
 
                     # ===============================================
                     # 2. THEMATIC MAP
@@ -2351,6 +2562,45 @@ elif len(st.session_state.history) > 0:
                     # 5. TABLES AND NODE CENTRALITY METRICS
                     # ===============================================
                     with tab_table:
+                        # --- FITUR BARU: TABEL VOSVIEWER STYLE ---
+                        st.markdown("#### 🔗 Keyword Occurrences & Total Link Strength")
+                        st.caption("Tabel metrik dasar kookurensi bergaya VOSviewer: jumlah kemunculan kata kunci dan total kekuatan relasinya (Total Link Strength).")
+                        
+                        try:
+                            keyword_metrics = []
+                            # Iterasi semua node/kata kunci yang ada di jaringan
+                            for i, node in enumerate(G_final_net.nodes()):
+                                occurrences = G_final_net.nodes[node].get('freq', 0)
+                                
+                                # Menghitung Total Link Strength (jumlah raw_weight dari semua relasi edge ke node ini)
+                                tls = sum(d.get('raw_weight', d.get('weight', 1)) for _, _, d in G_final_net.edges(node, data=True))
+                                
+                                keyword_metrics.append({
+                                    "id": i + 1,
+                                    "keyword": node,
+                                    "occurrences": occurrences,
+                                    "total link strength": tls
+                                })
+                                
+                            # Jadikan DataFrame dan urutkan berdasarkan Total Link Strength tertinggi
+                            df_kw_metrics = pd.DataFrame(keyword_metrics).sort_values(by="total link strength", ascending=False).reset_index(drop=True)
+                            df_kw_metrics['id'] = df_kw_metrics.index + 1 # Update ID agar berurutan setelah di-sort
+                            
+                            st.dataframe(df_kw_metrics, use_container_width=True, height=350)
+                            
+                            st.download_button(
+                                label="📥 Ekspor Tabel Occurrences & TLS (.csv)",
+                                data=convert_df_to_csv(df_kw_metrics),
+                                file_name="keyword_occurrences_tls.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error(f"Gagal memuat tabel kemunculan: {e}")
+
+                        st.markdown("---")
+                        # ----------------------------------------
+                        
                         st.markdown("#### Tabel Agregat Modularity")
                         st.caption("Tabulasi ringkasan klaster hasil kalkulasi Peta Tematik.")
                         if not df_theme.empty:
@@ -2620,11 +2870,23 @@ elif len(st.session_state.history) > 0:
                                 prompt_sys = """Anda adalah 'Strategic Research Policy Advisor' & Pakar Bibliometrik level Kementerian/CSIRO. 
 Buat Laporan Evaluasi Kebijakan Riset komprehensif yang membandingkan performa riset Indonesia dengan lanskap Global.
 
-Gunakan Format Analisis ini:
-1. **Analisis Produktivitas & Dampak (Impact)**: Evaluasi perbedaan rata-rata sitasi dan indikasi kualitas wadah publikasi.
-2. **Kesehatan Kolaborasi Internasional**: Berdasarkan persentase kolaborasi Indonesia, apakah riset kita cukup terintegrasi dengan jaringan global?
-3. **Kesenjangan Topik & Adopsi Teknologi (Gap Analysis)**: Berdasarkan data irisan topik dan terminologi ABSTRAK, sebutkan teknologi apa yang 'lagging' (hanya ada di Global) dan apa yang jadi fokus 'endemik' Indonesia.
-4. **Rekomendasi Kebijakan Strategis**: Berikan 3 poin rekomendasi konkret (misal: strategi pendanaan, prioritas riset) untuk mengejar ketertinggalan megatrend global.
+ATURAN FORMAT OUTPUT MUTLAK:
+1. WAJIB gunakan format teks Markdown yang rapi dan estetik.
+2. JANGAN PERNAH mengeluarkan output dalam format JSON (jangan gunakan tanda kurung kurawal {}). Keluarkan teks naratif langsung.
+3. Gunakan struktur dengan Heading (###), bullet points (-), dan teks tebal (**teks**) agar mudah dibaca oleh pemangku kebijakan.
+
+Struktur Laporan yang Diharapkan:
+### 1. Analisis Produktivitas & Dampak (Impact)
+[Tulis narasi evaluasi Anda di sini...]
+
+### 2. Kesehatan Kolaborasi Internasional
+[Tulis narasi evaluasi Anda di sini...]
+
+### 3. Kesenjangan Topik & Adopsi Teknologi (Gap Analysis)
+[Tulis narasi evaluasi Anda di sini...]
+
+### 4. Rekomendasi Kebijakan Strategis
+[Tulis 3 poin rekomendasi konkret di sini...]
 
 Gunakan Bahasa Indonesia formal akademis tinggi. Analisis HANYA berdasarkan data konkret di bawah ini."""
 
