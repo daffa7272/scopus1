@@ -26,6 +26,7 @@ import re
 import unicodedata
 import zlib
 import json
+import streamlit as st
 import math
 import logging
 import datetime
@@ -44,24 +45,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # DEVELOPER CONFIGURATION (IPC DATABASE ONLY)
 # =========================================================
 # Masukkan data kredensial Anda di sini agar user tidak perlu input manual
-IPC_DB_CONFIG = {
-    "project_id": "desa-cibanteng",
-    "table_id": "desa-cibanteng.scopus_data.kode_ipc",
-    # Tempelkan isi file JSON Service Account Anda di bawah ini
-    "service_account_json": {
-        "type": "service_account",
-  "project_id": "desa-cibanteng",
-  "private_key_id": "59ee04bf4971847a3c2b8870ae2d2e5a5ac78659",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDSG0cEzQ747bvc\nmJ73bV5NHAauXvY7keJ1/19BW/DLpKNFyQB175Bhi2FebNRIJfSpoO3jgQatxNGa\nW3L88CSYV6GZDBRu117tOBW75rt3D4JFaV7wl6H+wQcuSrvCMpMxj81XdE9CXLuY\nsSmGDtChZzP7rwAJhvEMWKANQcMiCs3tmtEurcFVqhMaL5aDQnnq9gIeg7bEju9v\nGw3QPvarTWvNKh9PqXsP9QcEvuJYlDjMz64EJUOabOzu7LvI0ermfnyA+7Ev4An9\nBZo1hA7zM+Zjq7V1WpFXd3O1WzdSLrAp2vNbJ0l9tKec3vgP6FnsxM3AxTcIOwax\nQSAAlKq7AgMBAAECggEAM5y1xm0lB2tG4bqwGjHIn4KJ9Z2oORvuGHRiDukp7qyD\n2ym0LkRqIDwf8BUl1I9WWbEJnwBcBqW5o4Rha9cF9lJYhQMdpdjMHdPQKvdUB7xM\nkQaAZvOovK7oN6vuEZdg5yTfGWOd8Lxc7PZgL+lFwNBcSbBEfxKh9hlzP65u49Z3\ngKYuYZ2MkYZ2bizYjR46rKuIC4Yjop1GtKuv/8C/nWvPqItjzw2j2hw6yYo+foRD\nJwMNy8ms4qIiyxLXqmIc74ZbpMHkwPyLVgc+BmQ0cEA5A3+a1Kzzvda/GnSp8dfu\nP2t0CNx6tX8idX1/e9PRSBBbkchGDVcCnFvCfCm7CQKBgQD08dJXhcqHGv/qjlVE\nO9v0knzN9devwmL/SYkBI3VigeYcOvycRMb9HMrehGq76YaVqvHkVoC6Hay4cXxu\ntW3zSbI9LvxNqDf2guW+chpLFvCwZKFdRa1anQbHu5CoCk5gEmAPnsnbcnEuwjx9\nr5l9qxfgkn5sfUXXofnk4oyKLwKBgQDbluyaa5aH9H2KB2dnoqW7qsbjPBW9Hhy3\nE6SkzHOXyNutcs2aib2aDU49lym1TDNoqF/yDhQXkDK4vYcn5OnisRVocKW6NiPh\ngU2C2OyjVZjidCFJBw0sYTFJ9HvbM/AFrrmZKwxCTI7cwQCBMVyY/p/IHKTmSAbi\nEvo40BQhNQKBgDzr2FEEabbotDX2aKar7K0LshbXymlgg5bTB0xNMWjqvfzPfvyu\n7n8Npjdp39IU5vBasAcGrMWdk9PcBgLTBSG5dqdZBE+cQy8Ap3uSjY+XiQ2WObwl\nFFSxMXqD4BqrVYr3hwTbjYETGatzi/AGuLpUz39/cAozridPlgOjhSjpAoGAMNvV\n7U3/AmUeAbZABckkwyruceUOmTO4A+w0+A4dsioY5vDiWn5HV52aSQ33U8WOsry0\nDHGhetS01HInPnMqryvjrYdS+KnPNf/FNVX64STMjaZ1OYB+J9/ATco+PLnDsB/+\nX9w6MA5Ew02WRSish8Yv2yC0eCCSl37NehKiR/kCgYBCshZBYMQcL4OkzEn+eeIy\nT41S8tPoiI7OcviDgHc/mBgEtNwVAT4MMuvVQG79K8tzRRXf2sZAkKIPJcK5vpVK\nX0HA+ESuGprooY4vztbgiH+po65l5ysfTSqzyphop0AWmDM9lmWlR3cMs3VWp3/i\nBDeDlc2W3heOyqfMyUWPmw==\n-----END PRIVATE KEY-----\n",
-  "client_email": "bigquery-streamlit@desa-cibanteng.iam.gserviceaccount.com",
-  "client_id": "110267520408256469136",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bigquery-streamlit%40desa-cibanteng.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
+try:
+    IPC_DB_CONFIG = {
+        "project_id": st.secrets["gcp_service_account"]["project_id"],
+        "table_id": "desa-cibanteng.scopus_data.kode_ipc",
+        "service_account_json": dict(st.secrets["gcp_service_account"])
     }
-}
+    # Mengambil API Key default jika tersedia di secrets
+    SECRET_SCOPUS_KEY = st.secrets.get("SCOPUS_API_KEY", "")
+except Exception:
+    st.error("⚠️ File secrets tidak ditemukan atau format salah. Pastikan .streamlit/secrets.toml sudah disetel.")
+    IPC_DB_CONFIG = {"project_id": "", "table_id": "", "service_account_json": {}}
 
 # ==============================
 # LOCAL STORAGE (PERSISTENCE) ENGINE
