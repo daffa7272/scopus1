@@ -1,21 +1,3 @@
-"""
-=============================================================================
-SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
-=============================================================================
-Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
-dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
-
-Versi Enterprise ini dilengkapi dengan:
-- Natural Language Processing (NLP)
-- Machine Learning Topic Modeling (LDA)
-- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
-- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
-- Advanced Graph Topology (NetworkX & Pyvis)
-- Generative AI Integration (Mistral, Gemini, Groq)
-- Local Storage Persistence (Penyimpanan API & Konfigurasi)
-=============================================================================
-"""
-
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -40,11 +22,16 @@ from google.cloud import bigquery
 # Konfigurasi Logging Dasar
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 # =========================================================
 # DEVELOPER CONFIGURATION (IPC DATABASE ONLY)
 # =========================================================
 # Masukkan data kredensial Anda di sini agar user tidak perlu input manual
+from google.oauth2 import service_account
+
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"]
+)
+
 IPC_DB_CONFIG = {
     "project_id": st.secrets["gcp_service_account"]["project_id"],
     "table_id": "desa-cibanteng.scopus_data.kode_ipc", 
@@ -431,6 +418,34 @@ def call_groq_sync(system_prompt: str, user_prompt: str, api_key: str, model: st
         if response.status_code == 200: return response.json()["choices"][0]["message"]["content"]
         else: return f"Error: {response.text}"
     except Exception as e: return f"Error: {e}"
+
+
+# --- ALAT DETEKSI ERROR SECRETS ---
+    with st.expander("🛠️ Debugger Koneksi BQ", expanded=True):
+        if st.button("Cek Status Secrets"):
+            try:
+                if "gcp_service_account" in st.secrets:
+                    st.success("1. Header [gcp_service_account] DITEMUKAN!")
+                    
+                    # Cek kelengkapan kunci
+                    kunci_bq = st.secrets["gcp_service_account"]
+                    if "project_id" in kunci_bq and "private_key" in kunci_bq:
+                        st.success(f"2. Project ID terbaca: {kunci_bq['project_id']}")
+                        
+                        # Cek apakah private key formatnya benar
+                        pk = kunci_bq['private_key']
+                        if "-----BEGIN PRIVATE KEY-----" in pk:
+                            st.success("3. Format Private Key VALID.")
+                        else:
+                            st.error("3. Format Private Key SALAH/RUSAK.")
+                    else:
+                        st.error("2. Isi gcp_service_account tidak lengkap.")
+                else:
+                    st.error("1. Header [gcp_service_account] TIDAK DITEMUKAN di Cloud Secrets!")
+            except Exception as e:
+                st.error(f"Terjadi error sistem: {e}")
+
+    
 
 # ==============================
 # DATA WRANGLING & EXTRACTORS
@@ -1100,7 +1115,22 @@ if menu_selection == "📖 Library & Glossary":
 elif menu_selection == "📥 Data Acquisition":
     st.title("📥 Data Acquisition")
     st.markdown("Mulai proyek bibliometrik Anda dengan mengimpor dataset langsung dari API server Scopus atau mengunggah data lokal milik Anda sendiri.")
-    
+   
+    if "history" in st.session_state and len(st.session_state.history) > 0:
+            df_aktif = st.session_state.history[0]
+            
+            # Mengambil nama sumber data (misal: "Data Awal (Scopus)" atau "Data Awal (BigQuery)")
+            sumber_data = st.session_state.history_actions[0] if "history_actions" in st.session_state else "Database Sistem"
+            
+            # Menampilkan kotak hijau tebal yang tidak akan hilang meski di-refresh
+            st.success(
+                f"🎉 **DATA AKTIF TERDETEKSI DI SISTEM!**\n\n"
+                f"🔹 **Total Dokumen:** `{len(df_aktif)} baris`\n"
+                f"🔹 **Sumber Akuisisi:** `{sumber_data}`\n\n"
+                f"👉 *Silakan klik menu-menu analitik (seperti 'Overview & Trends', 'AI Synthesis', dll) di Sidebar sebelah kiri untuk mulai mengeksplorasi data ini.*"
+            )
+            st.markdown("---") # Garis pembatas agar rapi
+        # =======================================================
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### 🔍 Opsi 1: Tarik via Scopus API")
