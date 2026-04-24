@@ -17,3 +17,4 @@ xlrd
 xlsxwriter
 PyPDF2
 pdfplumber
+matplotlib-venn
