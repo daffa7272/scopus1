@@ -1,21 +1,3 @@
-"""
-=============================================================================
-SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
-=============================================================================
-Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
-dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
-
-Versi Enterprise ini dilengkapi dengan:
-- Natural Language Processing (NLP)
-- Machine Learning Topic Modeling (LDA)
-- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
-- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
-- Advanced Graph Topology (NetworkX & Pyvis)
-- Generative AI Integration (Mistral, Gemini, Groq)
-- Local Storage Persistence (Penyimpanan API & Konfigurasi)
-=============================================================================
-"""
-
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -38,6 +20,30 @@ from google.cloud import bigquery
 
 # Konfigurasi Logging Dasar
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+# =========================================================
+# DEVELOPER CONFIGURATION (IPC DATABASE ONLY)
+# =========================================================
+# Masukkan data kredensial Anda di sini agar user tidak perlu input manual
+IPC_DB_CONFIG = {
+    "project_id": "desa-cibanteng",
+    "table_id": "desa-cibanteng.scopus_data.kode_ipc",
+    # Tempelkan isi file JSON Service Account Anda di bawah ini
+    "service_account_json": {
+        "type": "service_account",
+  "project_id": "desa-cibanteng",
+  "private_key_id": "59ee04bf4971847a3c2b8870ae2d2e5a5ac78659",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDSG0cEzQ747bvc\nmJ73bV5NHAauXvY7keJ1/19BW/DLpKNFyQB175Bhi2FebNRIJfSpoO3jgQatxNGa\nW3L88CSYV6GZDBRu117tOBW75rt3D4JFaV7wl6H+wQcuSrvCMpMxj81XdE9CXLuY\nsSmGDtChZzP7rwAJhvEMWKANQcMiCs3tmtEurcFVqhMaL5aDQnnq9gIeg7bEju9v\nGw3QPvarTWvNKh9PqXsP9QcEvuJYlDjMz64EJUOabOzu7LvI0ermfnyA+7Ev4An9\nBZo1hA7zM+Zjq7V1WpFXd3O1WzdSLrAp2vNbJ0l9tKec3vgP6FnsxM3AxTcIOwax\nQSAAlKq7AgMBAAECggEAM5y1xm0lB2tG4bqwGjHIn4KJ9Z2oORvuGHRiDukp7qyD\n2ym0LkRqIDwf8BUl1I9WWbEJnwBcBqW5o4Rha9cF9lJYhQMdpdjMHdPQKvdUB7xM\nkQaAZvOovK7oN6vuEZdg5yTfGWOd8Lxc7PZgL+lFwNBcSbBEfxKh9hlzP65u49Z3\ngKYuYZ2MkYZ2bizYjR46rKuIC4Yjop1GtKuv/8C/nWvPqItjzw2j2hw6yYo+foRD\nJwMNy8ms4qIiyxLXqmIc74ZbpMHkwPyLVgc+BmQ0cEA5A3+a1Kzzvda/GnSp8dfu\nP2t0CNx6tX8idX1/e9PRSBBbkchGDVcCnFvCfCm7CQKBgQD08dJXhcqHGv/qjlVE\nO9v0knzN9devwmL/SYkBI3VigeYcOvycRMb9HMrehGq76YaVqvHkVoC6Hay4cXxu\ntW3zSbI9LvxNqDf2guW+chpLFvCwZKFdRa1anQbHu5CoCk5gEmAPnsnbcnEuwjx9\nr5l9qxfgkn5sfUXXofnk4oyKLwKBgQDbluyaa5aH9H2KB2dnoqW7qsbjPBW9Hhy3\nE6SkzHOXyNutcs2aib2aDU49lym1TDNoqF/yDhQXkDK4vYcn5OnisRVocKW6NiPh\ngU2C2OyjVZjidCFJBw0sYTFJ9HvbM/AFrrmZKwxCTI7cwQCBMVyY/p/IHKTmSAbi\nEvo40BQhNQKBgDzr2FEEabbotDX2aKar7K0LshbXymlgg5bTB0xNMWjqvfzPfvyu\n7n8Npjdp39IU5vBasAcGrMWdk9PcBgLTBSG5dqdZBE+cQy8Ap3uSjY+XiQ2WObwl\nFFSxMXqD4BqrVYr3hwTbjYETGatzi/AGuLpUz39/cAozridPlgOjhSjpAoGAMNvV\n7U3/AmUeAbZABckkwyruceUOmTO4A+w0+A4dsioY5vDiWn5HV52aSQ33U8WOsry0\nDHGhetS01HInPnMqryvjrYdS+KnPNf/FNVX64STMjaZ1OYB+J9/ATco+PLnDsB/+\nX9w6MA5Ew02WRSish8Yv2yC0eCCSl37NehKiR/kCgYBCshZBYMQcL4OkzEn+eeIy\nT41S8tPoiI7OcviDgHc/mBgEtNwVAT4MMuvVQG79K8tzRRXf2sZAkKIPJcK5vpVK\nX0HA+ESuGprooY4vztbgiH+po65l5ysfTSqzyphop0AWmDM9lmWlR3cMs3VWp3/i\nBDeDlc2W3heOyqfMyUWPmw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "bigquery-streamlit@desa-cibanteng.iam.gserviceaccount.com",
+  "client_id": "110267520408256469136",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bigquery-streamlit%40desa-cibanteng.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+    }
+}
 
 # ==============================
 # LOCAL STORAGE (PERSISTENCE) ENGINE
@@ -994,78 +1000,74 @@ with st.sidebar:
             st.rerun() # Refresh agar state tersimpan terlihat
             
 with st.sidebar:
-     with st.expander("🧰 WIPO IPC Excel Database", expanded=False):
-        # --- TAUTAN REFERENSI RESMI ---
-        st.markdown("Akses cepat referensi paten internasional.")
-        st.markdown("[🌐 **Buka Skema IPC WIPO (Tautan Eksternal)**](https://www.wipo.int/ipc/itos4ipc/ITSupport_and_download_area/20260101/pdf/scheme/full_ipc/en/index.html)")
-        st.markdown("---")
-
-        # --- BAGIAN 1: KAMUS KODE NEGARA WIPO ---
-        st.markdown("**🌍 Kamus Kode Negara WIPO**")
-        wipo_query = st.text_input("Ketik 2 Huruf Kode Negara:", max_chars=2, placeholder="Misal: US, EP, WO").strip().upper()
-        if len(wipo_query) == 2:
-            if wipo_query in WIPO_2_LETTER_TO_ISO3:
-                iso_code = WIPO_2_LETTER_TO_ISO3[wipo_query]
-                country_name = ISO3_TO_NAME.get(iso_code, iso_code)
-                st.success(f"✅ **{country_name}**")
-            else:
-                st.error("❌ Kode Tidak Ditemukan")
-                
-        st.markdown("---")
-        
-        # --- BAGIAN 2: DATABASE EXCEL LOKAL ---
-        st.markdown("**📖 Database Kamus IPC (Excel)**")
-        st.caption("Baca database IPC langsung dari file Excel lokal untuk kecepatan dan akurasi 100%.")
-        
-        # Path folder tempat Anda menyimpan file Excel database
-        db_folder = st.text_input("Path Folder Database Excel:", value="./database")
-        
-        if os.path.exists(db_folder):
-            # Mencari file Excel di dalam folder
-            all_excels = [f for f in os.listdir(db_folder) if f.lower().endswith(('.xlsx', '.xls'))]
+        @st.fragment
+        def komponen_pencarian_ipc():
+            st.markdown("**☁️ Pencarian Kamus IPC Resmi**")
+            st.caption("Pencarian asinkron: Tidak akan me-refresh grafik analisis di layar utama.")
             
-            if all_excels:
-                selected_excel = st.selectbox("Pilih File Database IPC:", options=all_excels)
-                excel_path = os.path.join(db_folder, selected_excel)
-                
-                if st.button("🚀 Muat Database IPC", use_container_width=True):
-                    with st.spinner("Memuat database ke dalam memori..."):
-                        hasil_dict, pesan = load_ipc_excel_database(excel_path)
-                        
-                        if hasil_dict:
-                            st.session_state.ipc_excel_dictionary = hasil_dict
-                            st.success(pesan)
-                        else:
-                            st.error(pesan)
-            else:
-                st.warning(f"Tidak ada file Excel (.xlsx/.xls) di folder '{db_folder}'.")
-        else:
-            st.error(f"Folder '{db_folder}' tidak ditemukan.")
-
-        # --- BAGIAN 3: PENCARIAN HASIL DATABASE ---
-        if 'ipc_excel_dictionary' in st.session_state and st.session_state.ipc_excel_dictionary:
-            st.markdown("---")
-            search_ipc = st.text_input("🔍 Cari Kode IPC atau Deskripsi (Misal: A01B atau Soil):").strip().upper()
+            search_ipc_bq = st.text_input("🔍 Cari Kode atau Deskripsi:", placeholder="Contoh: A01B atau Soil", key="input_ipc_async").strip().upper()
             
-            if search_ipc:
-                # Pencarian Fuzzy (mencari di Kode ATAU Deskripsi)
-                query_clean = search_ipc.replace(" ", "").replace("/", "")
-                match_results = {}
-                
-                for k, v in st.session_state.ipc_excel_dictionary.items():
-                    k_clean = k.replace(" ", "").replace("/", "").upper()
-                    v_upper = str(v).upper()
-                    
-                    if query_clean in k_clean or search_ipc in v_upper:
-                        match_results[k] = v
-                
-                if match_results:
-                    # Menampilkan SEMUA hasil tanpa batasan
-                    for k, v in match_results.items():
-                        st.info(f"**{k}**\n\n{v}")
-                    st.caption(f"Menampilkan total {len(match_results)} hasil.")
+            if st.button("🚀 Cari Kode IPC", use_container_width=True, key="btn_ipc_async"):
+                if not search_ipc_bq:
+                    st.warning("Masukkan kata kunci pencarian.")
                 else:
-                    st.error("Pencarian tidak ditemukan dalam database.")
+                    with st.spinner("Mengakses hierarki database cloud..."):
+                        # 1. Sanitasi Input
+                        safe_search = search_ipc_bq.replace("'", "\\'").replace('"', '\\"')
+                        query_clean = safe_search.replace(" ", "").replace("/", "")
+                        
+                        # 2. SQL Query Canggih
+                        sql_ipc_search = f"""
+                        WITH matches AS (
+                            SELECT IPC 
+                            FROM `{IPC_DB_CONFIG['table_id']}`
+                            WHERE 
+                                UPPER(REPLACE(REPLACE(IPC, ' ', ''), '/', '')) LIKE '%{query_clean}%' 
+                                OR UPPER(Description) LIKE '%{safe_search}%'
+                            LIMIT 15
+                        )
+                        SELECT DISTINCT b.IPC, b.Description
+                        FROM matches m
+                        JOIN `{IPC_DB_CONFIG['table_id']}` b
+                          ON b.IPC = SUBSTR(m.IPC, 1, 3) 
+                          OR b.IPC = SUBSTR(m.IPC, 1, 4) 
+                          OR b.IPC = m.IPC
+                        ORDER BY b.IPC
+                        """
+                        
+                        # 3. Eksekusi Query
+                        df_hasil_ipc, pesan_bq = load_data_from_bigquery(
+                            IPC_DB_CONFIG['project_id'], 
+                            sql_ipc_search, 
+                            IPC_DB_CONFIG['service_account_json']
+                        )
+                        
+                        # 4. Tampilkan Hasil
+                        if df_hasil_ipc is not None and not df_hasil_ipc.empty:
+                            st.success(f"Membentangkan pohon hierarki untuk {len(df_hasil_ipc)} data terkait:")
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            
+                            for _, row in df_hasil_ipc.iterrows():
+                                kode = str(row['IPC']).strip()
+                                desc = str(row['Description']).strip()
+                                panjang_kode = len(kode)
+                                
+                                if panjang_kode == 3:
+                                    st.markdown(f"### 📦 **{kode}**")
+                                    st.markdown(f"<div style='color:#2c3e50; font-weight:bold; margin-bottom:15px;'>{desc}</div>", unsafe_allow_html=True)
+                                elif panjang_kode == 4:
+                                    st.markdown(f"#### &nbsp;&nbsp;&nbsp;↳ 📂 **{kode}**")
+                                    st.markdown(f"<div style='margin-left: 35px; color:#34495e; margin-bottom:15px;'>{desc}</div>", unsafe_allow_html=True)
+                                else:
+                                    st.info(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ 📄 **{kode}** — {desc}")
+                                    
+                        elif df_hasil_ipc is not None and df_hasil_ipc.empty:
+                            st.warning("Data tidak ditemukan.")
+                        else:
+                            st.error(f"Terjadi kendala koneksi database.")
+
+        # Eksekusi dan panggil komponen fragment tersebut di sidebar
+        komponen_pencarian_ipc()
 
 # ==============================
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
@@ -1141,7 +1143,10 @@ elif menu_selection == "📥 Data Acquisition":
                         st.session_state.current_step = 0
                         st.session_state.preview_action = None
                         st.session_state.map_rendered = False
-                        st.success(f"✅ Berhasil menarik {len(loaded_data)} dokumen! Silakan pilih menu lain di Sidebar untuk mulai menganalisis.")
+                        
+                        # --- PERUBAHAN DI SINI ---
+                        st.toast(f"✅ Berhasil menarik {len(loaded_data)} dokumen!", icon="🎉")
+                        st.rerun()
 
     with col2:
         st.markdown("#### 📁 Opsi 2: Unggah File Lokal (Local Data)")
@@ -1185,7 +1190,14 @@ elif menu_selection == "📥 Data Acquisition":
                     st.session_state.last_file = uploaded_file.name
                     st.session_state.preview_action = None
                     st.session_state.map_rendered = False
-                    st.success(f"✅ Memuat {len(loaded_data)} baris data! Silakan pilih menu di Sidebar untuk melanjutkan.")
+                    
+                    # --- PERUBAHAN DI SINI ---
+                    # Gunakan toast agar pesan muncul melayang di pojok kanan
+                    st.toast(f"✅ Memuat {len(loaded_data)} baris data!", icon="🎉") 
+                    # Paksa Streamlit menggambar ulang UI agar menu langsung muncul
+                    st.rerun() 
+                    # -------------------------
+                    
                 except Exception as e: 
                     st.error(f"❌ Gagal memproses file: Kesalahan Parsing -> {e}")
     st.markdown("---")
@@ -1244,15 +1256,20 @@ ORDER BY publication_year DESC"""
                     df_bq, message = load_data_from_bigquery(bq_project, bq_query, creds)
                     
                     if df_bq is not None:
-                        # --- TAMBAHAN: SIMPAN DATA KE MEMORI UTAMA SISTEM ---
+                        # --- TAMBAHAN: SIMPAN KE HISTORY & AUTO RERUN ---
                         if bq_mode == "Preview Data (Limit)":
+                            # Bersihkan data dan simpan ke memori utama
                             df_bq_clean = df_bq.fillna("Tidak tersedia")
                             st.session_state.history = [df_bq_clean]
                             st.session_state.history_actions = [f"Data Awal (BigQuery: {bq_project})"]
                             st.session_state.current_step = 0
                             st.session_state.preview_action = None
                             st.session_state.map_rendered = False
-                        # ----------------------------------------------------
+                            
+                            # Munculkan notifikasi dan paksa refresh UI agar menu muncul
+                            st.toast(f"✅ Berhasil menarik {len(df_bq)} baris dari BigQuery!", icon="🚀")
+                            st.rerun()
+                        # -----------------------------------------------
 
                         st.success(message)
                         st.dataframe(df_bq, use_container_width=True)
