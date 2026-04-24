@@ -45,17 +45,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # DEVELOPER CONFIGURATION (IPC DATABASE ONLY)
 # =========================================================
 # Masukkan data kredensial Anda di sini agar user tidak perlu input manual
-try:
-    IPC_DB_CONFIG = {
-        "project_id": st.secrets["gcp_service_account"]["project_id"],
-        "table_id": "desa-cibanteng.scopus_data.kode_ipc",
-        "service_account_json": dict(st.secrets["gcp_service_account"])
-    }
-    # Mengambil API Key default jika tersedia di secrets
-    SECRET_SCOPUS_KEY = st.secrets.get("SCOPUS_API_KEY", "")
-except Exception:
-    st.error("⚠️ File secrets tidak ditemukan atau format salah. Pastikan .streamlit/secrets.toml sudah disetel.")
-    IPC_DB_CONFIG = {"project_id": "", "table_id": "", "service_account_json": {}}
+IPC_DB_CONFIG = {
+    "project_id": st.secrets["gcp_service_account"]["project_id"],
+    "table_id": "desa-cibanteng.scopus_data.kode_ipc", 
+    "service_account_json": dict(st.secrets["gcp_service_account"])
+}
 
 # ==============================
 # LOCAL STORAGE (PERSISTENCE) ENGINE
