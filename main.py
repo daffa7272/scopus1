@@ -1019,6 +1019,7 @@ with st.sidebar:
             save_settings(new_settings)
             st.toast("Pengaturan berhasil disimpan secara lokal!", icon="✅")
             st.rerun() # Refresh agar state tersimpan terlihat
+
             
 with st.sidebar:
         @st.fragment
@@ -1095,6 +1096,18 @@ with st.sidebar:
 
         # Eksekusi dan panggil komponen fragment tersebut di sidebar
         komponen_pencarian_ipc()
+         # --- BAGIAN 1: KAMUS KODE NEGARA WIPO ---
+        st.markdown("**🌍 Kamus Kode Negara WIPO**")
+        wipo_query = st.text_input("Ketik 2 Huruf Kode Negara:", max_chars=2, placeholder="Misal: US, EP, WO").strip().upper()
+        if len(wipo_query) == 2:
+            if wipo_query in WIPO_2_LETTER_TO_ISO3:
+                iso_code = WIPO_2_LETTER_TO_ISO3[wipo_query]
+                country_name = ISO3_TO_NAME.get(iso_code, iso_code)
+                st.success(f"✅ **{country_name}**")
+            else:
+                st.error("❌ Kode Tidak Ditemukan")
+                
+        st.markdown("---")
 
 # ==============================
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
