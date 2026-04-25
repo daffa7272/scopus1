@@ -1023,9 +1023,15 @@ with st.sidebar:
 with st.sidebar:
         @st.fragment
         def komponen_pencarian_ipc():
+           
             st.markdown("**☁️ Pencarian Kamus IPC Resmi**")
-            st.caption("Pencarian asinkron: Tidak akan me-refresh grafik analisis di layar utama.")
-            
+            st.link_button(
+    "🌐 Buka WIPO IPC Viewer (2026)", 
+    "https://www.wipo.int/classifications/ipc/en/ITsupport/Version20260101/transformations/viewer/index.htm",
+    use_container_width=True,
+    help="Buka direktori resmi WIPO untuk versi 2026 di tab baru"
+)
+            st.markdown("", unsafe_allow_html=True)            
             search_ipc_bq = st.text_input("🔍 Cari Kode atau Deskripsi:", placeholder="Contoh: A01B atau Soil", key="input_ipc_async").strip().upper()
             
             if st.button("🚀 Cari Kode IPC", use_container_width=True, key="btn_ipc_async"):
@@ -1571,8 +1577,122 @@ elif len(st.session_state.history) > 0:
                     with col_t2:
                         trend_delim = st.selectbox("Delimiter (Pemisah Entitas):", [";", ",", "|", "Spasi ( )", "Tidak Ada"], index=0)
                     
-                    if st.button("🚀 Render Garis Tren Temporal", type="primary"):
+                    st.markdown("<br>", unsafe_allow_html=True) # Memberi sedikit jarak spasi agar tidak terlalu dempet
+
+                    # --- UI BARU: TOMBOL RENDER & POPOVER PEMBERSIHAN ---
+                    col_render, col_clean = st.columns([1, 1])
+                    
+                    with col_clean:
+                        with st.popover("🧹 Set Thesaurus & Stopwords", use_container_width=True):
+                            st.caption("Pembersihan ini hanya berlaku untuk grafik tren di bawah.")
+                            thesaurus_input = st.text_area(
+                                "Thesaurus (A = B)", 
+                                placeholder="Contoh:\nDIGITAL TWIN (DT) = DIGITAL TWIN",
+                                height=150
+                            )
+                            stopwords_input = st.text_area(
+                                "Stopwords (Hapus)", 
+                                placeholder="Contoh:\nREVIEW\nSURVEY",
+                                height=150
+                            )
+                            
+                    with col_render:
+                        # Masukkan eksekusi tombol ke dalam variabel
+                        render_diklik = st.button("🚀 Render Garis Tren Temporal", type="primary", use_container_width=True)
+
+                    # --- LOGIKA EKSEKUSI ---
+                 # --- LOGIKA EKSEKUSI ---
+                    if render_diklik:
                         actual_delim = {";": ";", ",": ",", "|": "|", "Spasi ( )": " "}.get(trend_delim)
+
+                        # =========================================================
+                        # 1. AMBIL DATA & PERSIAPAN KOLOM
+                        # =========================================================
+                        df_aktif = st.session_state.history[0].copy()
+
+                        # --- SMART EXTRACTOR KHUSUS DATA PATEN / FORMAT LAIN ---
+                        # Jika Year_Numeric belum ada, kita paksa buat dari kolom yang tersedia
+                        if 'Year_Numeric' not in df_aktif.columns and 'Year' not in df_aktif.columns:
+                            if 'Publication Date' in df_aktif.columns:
+                                # Ekstrak 4 digit tahun (19xx atau 20xx) dari format tanggal apapun (DD-MM-YYYY atau YYYY-MM-DD)
+                                df_aktif['Year_Numeric'] = df_aktif['Publication Date'].astype(str).str.extract(r'((?:19|20)\d{2})')[0]
+                            elif 'year' in df_aktif.columns:
+                                # Ubah 'year' huruf kecil menjadi Year_Numeric
+                                df_aktif['Year_Numeric'] = df_aktif['year'].astype(str)
+                            elif 'Publication Year' in df_aktif.columns:
+                                df_aktif['Year_Numeric'] = df_aktif['Publication Year'].astype(str)
+
+                        # Pencarian otomatis (cerdas) untuk nama kolom yang mendefinisikan Tahun
+                        col_year = None
+                        for kandidat in ['Year_Numeric', 'Year', 'Tahun', 'year', 'Publication Year']:
+                            if kandidat in df_aktif.columns:
+                                col_year = kandidat
+                                break # Berhenti mencari jika sudah ketemu
+                                
+                        # Sabuk pengaman
+                        if col_year is None:
+                            st.error(f"⚠️ Gagal menemukan kolom tahun di data ini! Kolom yang tersedia hanya: {', '.join(df_aktif.columns)}")
+                            st.stop() 
+                        
+                        # Ambil hanya kolom Tahun dan Kolom Entitas yang dipilih, lalu buang data kosong
+                        df_trend = df_aktif[[col_year, trend_col]].dropna().copy()
+
+                        # =========================================================
+                        # 2. LOGIKA SPLIT & EXPLODE DELIMITER
+                        # =========================================================
+                        if actual_delim:
+                            df_trend[trend_col] = df_trend[trend_col].astype(str).str.split(actual_delim)
+                            df_trend = df_trend.explode(trend_col)
+                        
+                        df_trend.rename(columns={trend_col: 'Entitas', col_year: 'Tahun'}, inplace=True)
+
+                        # =========================================================
+                        # 3. LOGIKA PEMBERSIHAN ANTI-BADAI (THESAURUS & STOPWORDS)
+                        # =========================================================
+                        
+                        # A. Standarisasi Teks Dasar
+                        df_trend['Entitas'] = df_trend['Entitas'].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
+                        
+                        # B. Eksekusi Thesaurus (Penggabungan Kata)
+                        if thesaurus_input and thesaurus_input.strip():
+                            dict_thes = {}
+                            for line in thesaurus_input.split('\n'):
+                                if '=' in line:
+                                    lama, baru = line.split('=', 1)
+                                    kl = " ".join(lama.strip().upper().split())
+                                    kb = " ".join(baru.strip().upper().split())
+                                    if kl and kb:
+                                        dict_thes[kl] = kb
+                            
+                            # Menggunakan pandas .replace() untuk akurasi 100%
+                            if dict_thes:
+                                df_trend['Entitas'] = df_trend['Entitas'].replace(dict_thes)
+                                
+                        # C. Eksekusi Stopwords (Penghapusan Kata)
+                        if stopwords_input and stopwords_input.strip():
+                            list_stop = [" ".join(w.strip().upper().split()) for w in stopwords_input.replace(',', '\n').split('\n') if w.strip()]
+                            if list_stop:
+                                df_trend = df_trend[~df_trend['Entitas'].isin(list_stop)]
+                                
+                        # D. Finalisasi (Buang baris kosong/invalid)
+                        df_trend = df_trend[(df_trend['Entitas'] != "") & (df_trend['Entitas'] != "NAN") & (df_trend['Entitas'] != "NONE")]
+
+                        # =========================================================
+                        # 4. HITUNG TOP 10 DARI DATA YANG SUDAH BERSIH (PENTING!)
+                        # =========================================================
+                        # Ambil 10 Entitas teratas dari df_trend yang BARU SAJA dicuci
+                        top_10_entitas = df_trend['Entitas'].value_counts().head(10).index.tolist()
+                        df_top10 = df_trend[df_trend['Entitas'].isin(top_10_entitas)]
+                        chart_data = df_top10.groupby(['Tahun', 'Entitas']).size().reset_index(name='Frekuensi')
+
+                        # =========================================================
+                        # 5. LANGSUNG RENDER GRAFIK (TIDAK ADA PERHITUNGAN LAGI)
+                        # =========================================================
+            
+
+                        
+                        
+                        # ---> (PASTE LOGIKA PEMBERSIHAN THESAURUS YANG ADA .str.replace(r'\s+', ' ') DI SINI) <---
                         
                         with st.spinner("Menghitung dinamika temporal..."):
                             temp_df = data[['Year_Numeric', trend_col]].copy().dropna()
@@ -1595,46 +1715,72 @@ elif len(st.session_state.history) > 0:
                             entity_totals = temp_df['Entitas'].value_counts()
                             
                             # 2. Agregasi FULL per tahun dan entitas (Untuk Data Tabel)
-                            full_trend_grouped = temp_df.groupby(['Year_Numeric', 'Entitas']).size().reset_index(name='Frekuensi')
+                            full_trend_grouped = df_trend.groupby(['Tahun', 'Entitas']).size().reset_index(name='Frekuensi')
                             
                             if not full_trend_grouped.empty:
-                                # --- A. RENDER GRAFIK CHART (Hanya Top 10) ---
-                                top_entities = entity_totals.head(10).index.tolist()
-                                chart_data = full_trend_grouped[full_trend_grouped['Entitas'].isin(top_entities)]
+                            # --- A. RENDER GRAFIK CHART (Plotly) ---
+                             import plotly.express as px
+                            fig_trend = px.line(
+                                chart_data, x='Tahun', y='Frekuensi', color='Entitas',
+                                markers=True, title=f"Tren Top 10 '{trend_col}' (Data Bersih)"
+                            )
+                            st.plotly_chart(fig_trend, use_container_width=True)
+
+                            # =========================================================
+                            # FITUR: RINGKASAN PERINGKAT ENTITAS PER TAHUN
+                            # =========================================================
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            with st.expander("📊 Lihat Ringkasan Peringkat per Tahun (Leaderboard)"):
+                                st.caption("Urutan entitas yang paling dominan pada setiap tahunnya (Data telah melalui Thesaurus).")
                                 
-                                fig_trend = px.line(chart_data, x='Year_Numeric', y='Frekuensi', color='Entitas', markers=True,
-                                                    title=f"Tren Top 10 '{trend_col}' Sepanjang Waktu",
-                                                    labels={'Year_Numeric': 'Tahun', 'Frekuensi': 'Jumlah Kemunculan'})
-                                fig_trend.update_layout(xaxis=dict(dtick=1), margin=dict(l=0, r=0, t=40, b=0))
-                                st.plotly_chart(fig_trend, use_container_width=True, config=PLOTLY_DL_CONFIG)
-                                
-                                # --- B. RENDER TABEL DISTRIBUSI (Seluruh Data) ---
-                                st.markdown("---")
-                                st.markdown(f"#### 🗃️ Tabel Distribusi Frekuensi Keseluruhan '{trend_col}'")
-                                st.caption(f"Menampilkan jumlah kemunculan seluruh **{len(entity_totals)}** variasi kata kunci/IPC per tahun.")
-                                
-                                # Pivot table agar Tahun menjadi kolom dan Entitas menjadi baris
-                                pivot_df = full_trend_grouped.pivot(index='Entitas', columns='Year_Numeric', values='Frekuensi').fillna(0).astype(int)
-                                
-                                # Tambahkan kolom Total Keseluruhan agar mudah disortir
-                                pivot_df['Total Keseluruhan'] = pivot_df.sum(axis=1)
-                                
-                                # Urutkan dari yang kemunculannya paling banyak
-                                pivot_df = pivot_df.sort_values(by='Total Keseluruhan', ascending=False)
-                                
-                                # Tampilkan Tabel Interaktif
-                                st.dataframe(pivot_df, use_container_width=True, height=350)
-                                
-                                # Tambahkan tombol Download khusus untuk tabel ini
-                                st.download_button(
-                                    label="📥 Unduh Seluruh Data Tabel (.csv)",
-                                    data=pivot_df.reset_index().to_csv(index=False).encode('utf-8'),
-                                    file_name=f"distribusi_{trend_col}_lengkap.csv",
-                                    mime="text/csv",
-                                    use_container_width=True
-                                )
-                            else:
-                                st.info("Data tidak mencukupi untuk visualisasi tren.")
+                                summary_list = []
+                                # Menggunakan 'Tahun' (hasil sinkronisasi)
+                                for year in sorted(chart_data['Tahun'].unique()):
+                                    year_data = chart_data[chart_data['Tahun'] == year].sort_values(by='Frekuensi', ascending=False)
+                                    year_data = year_data[year_data['Frekuensi'] > 0]
+                                    
+                                    if not year_data.empty:
+                                        ranked_entities = [
+                                            f"{i+1}. {row.get('Entitas', '')} ({row['Frekuensi']})" 
+                                            for i, row in enumerate(year_data.to_dict('records'))
+                                        ]
+                                        summary_list.append({
+                                            "Tahun": year,
+                                            "Urutan Peringkat": " 🏆 " + " &nbsp; | &nbsp; ".join(ranked_entities)
+                                        })
+                                        
+                                if summary_list:
+                                    df_summary = pd.DataFrame(summary_list).set_index("Tahun")
+                                    st.markdown(df_summary.to_html(escape=False, classes='table table-striped', justify='left'), unsafe_allow_html=True)
+                                else:
+                                    st.info("Data tidak mencukupi untuk ringkasan.")
+                            
+                            # --- B. RENDER TABEL DISTRIBUSI (Sinkron Thesaurus) ---
+                            st.markdown("---")
+                            st.markdown(f"#### 🗃️ Tabel Distribusi Frekuensi Keseluruhan '{trend_col}'")
+                            st.caption(f"Menampilkan seluruh **{len(entity_totals)}** entitas yang telah dibersihkan.")
+                            
+                            # Pivot table (Gunakan 'Tahun' sebagai kolom)
+                            # Mencari secara dinamis apa nama kolom waktunya (Tahun/Year/Year_Numeric) yang ada di dalam full_trend_grouped
+                            kolom_waktu_aktif = [col for col in full_trend_grouped.columns if col not in ['Entitas', 'Frekuensi']][0]
+
+# Terapkan secara otomatis ke dalam pivot
+                            pivot_df = full_trend_grouped.pivot(index='Entitas', columns=kolom_waktu_aktif, values='Frekuensi').fillna(0).astype(int)
+                            
+                            pivot_df['Total Keseluruhan'] = pivot_df.sum(axis=1)
+                            pivot_df = pivot_df.sort_values(by='Total Keseluruhan', ascending=False)
+                            
+                            st.dataframe(pivot_df, use_container_width=True, height=350)
+                            
+                            st.download_button(
+                                label="📥 Unduh Seluruh Data Tabel Bersih (.csv)",
+                                data=pivot_df.reset_index().to_csv(index=False).encode('utf-8'),
+                                file_name=f"distribusi_{trend_col}_bersih.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                    else:
+                        st.info("Data tidak mencukupi untuk visualisasi tren.")
 
     # ---------------------------------------------------------
     # MENU 3: DATA CLEANING (OPENREFINE)
