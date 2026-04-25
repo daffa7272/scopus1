@@ -3062,126 +3062,156 @@ Berdasarkan data di atas, berikan laporan singkat berisi:
                 # =========================================================
         # ISI KONTEN TAB 6: AI SYNTHESIS KHUSUS INDONESIA
         # =========================================================
-        with tab6:
-            st.markdown("### 🇮🇩 AI Synthesis: Literatur Konteks Indonesia")
-            st.caption("Gunakan AI untuk membaca abstrak publikasi Indonesia secara massal dan menemukan Celah Riset (Research Gap) yang prospektif.")
-            st.markdown("---")
+            with tab6:
+                st.markdown("### 🇮🇩 AI Synthesis: Literatur Konteks Indonesia")
+                st.caption("Gunakan AI untuk membaca abstrak publikasi Indonesia secara massal dan menemukan Celah Riset (Research Gap) yang prospektif.")
+                st.markdown("---")
 
-            # 1. Cek ketersediaan variabel df_indo (hasil pisahan komparasi)
-            if 'df_indo' in locals() or 'df_indo' in globals():
-                if not df_indo.empty:
-                    
-                    # --- A. BAGIAN DAFTAR JUDUL (TABLE) ---
-                    with st.expander(f"📄 Daftar Judul Publikasi Indonesia ({len(df_indo)} Dokumen)", expanded=False):
-                        st.caption("Berikut adalah rincian dokumen yang teridentifikasi berafiliasi dengan Indonesia.")
+                # 1. Cek ketersediaan variabel df_indo (hasil pisahan komparasi)
+                if 'df_indo' in locals() or 'df_indo' in globals():
+                    if not df_indo.empty:
                         
-                        # Deteksi Kolom Cerdas
-                        kolom_tampil = []
-                        col_title = next((c for c in ['Title', 'Article Title', 'Document Title'] if c in df_indo.columns), None)
-                        col_authors = next((c for c in ['Authors', 'Inventors', 'Author(s)'] if c in df_indo.columns), None)
-                        col_source = next((c for c in ['Source title', 'Source', 'Publication Name', 'Journal'] if c in df_indo.columns), None)
-                        col_yr = next((c for c in ['Year_Numeric', 'Year', 'Tahun', 'Publication Year'] if c in df_indo.columns), None)
-                        col_cite = next((c for c in ['Cited by', 'Citations', 'Times Cited'] if c in df_indo.columns), None)
-
-                        for c in [col_title, col_authors, col_source, col_yr, col_cite]:
-                            if c: kolom_tampil.append(c)
-
-                        if kolom_tampil:
-                            df_display = df_indo[kolom_tampil].copy()
-                            if col_cite:
-                                df_display[col_cite] = pd.to_numeric(df_display[col_cite], errors='coerce').fillna(0)
-                                df_display = df_display.sort_values(by=col_cite, ascending=False)
+                        # --- A. BAGIAN DAFTAR JUDUL (TABLE) ---
+                        with st.expander(f"📄 Daftar Judul Publikasi Indonesia ({len(df_indo)} Dokumen)", expanded=False):
+                            st.caption("Berikut adalah rincian dokumen yang teridentifikasi berafiliasi dengan Indonesia.")
                             
-                            search_q = st.text_input("🔍 Cari Judul atau Penulis di Korpus Indonesia:", placeholder="Masukkan kata kunci...", key="search_indo_tab6")
-                            if search_q:
-                                mask = df_display[col_title].astype(str).str.contains(search_q, case=False, na=False) if col_title else pd.Series(False, index=df_display.index)
-                                if col_authors:
-                                    mask = mask | df_display[col_authors].astype(str).str.contains(search_q, case=False, na=False)
-                                df_display = df_display[mask]
+                            # Deteksi Kolom Cerdas
+                            kolom_tampil = []
+                            col_title = next((c for c in ['Title', 'Article Title', 'Document Title'] if c in df_indo.columns), None)
+                            col_authors = next((c for c in ['Authors', 'Inventors', 'Author(s)'] if c in df_indo.columns), None)
+                            col_source = next((c for c in ['Source title', 'Source', 'Publication Name', 'Journal'] if c in df_indo.columns), None)
+                            col_yr = next((c for c in ['Year_Numeric', 'Year', 'Tahun', 'Publication Year'] if c in df_indo.columns), None)
+                            col_cite = next((c for c in ['Cited by', 'Citations', 'Times Cited'] if c in df_indo.columns), None)
 
-                            st.dataframe(df_display, use_container_width=True, height=300)
-                            st.download_button("📥 Unduh Daftar (.csv)", df_display.to_csv(index=False).encode('utf-8'), "publikasi_indo.csv", "text/csv")
+                            for c in [col_title, col_authors, col_source, col_yr, col_cite]:
+                                if c: kolom_tampil.append(c)
+
+                            if kolom_tampil:
+                                df_display = df_indo[kolom_tampil].copy()
+                                if col_cite:
+                                    df_display[col_cite] = pd.to_numeric(df_display[col_cite], errors='coerce').fillna(0)
+                                    df_display = df_display.sort_values(by=col_cite, ascending=False)
+                                
+                                search_q = st.text_input("🔍 Cari Judul atau Penulis di Korpus Indonesia:", placeholder="Masukkan kata kunci...", key="search_indo_tab6")
+                                if search_q:
+                                    mask = df_display[col_title].astype(str).str.contains(search_q, case=False, na=False) if col_title else pd.Series(False, index=df_display.index)
+                                    if col_authors:
+                                        mask = mask | df_display[col_authors].astype(str).str.contains(search_q, case=False, na=False)
+                                    df_display = df_display[mask]
+
+                                st.dataframe(df_display, use_container_width=True, height=300)
+                                st.download_button("📥 Unduh Daftar (.csv)", df_display.to_csv(index=False).encode('utf-8'), "publikasi_indo.csv", "text/csv")
+                            else:
+                                st.warning("Kolom standar tidak ditemukan.")
+
+                        # --- B. BAGIAN AI SYNTHESIS ---
+                        col_abstract_ai = next((c for c in ['Abstract', 'abstract', 'Summary'] if c in df_indo.columns), None)
+
+                        if not col_abstract_ai:
+                            st.warning("⚠️ Kolom 'Abstract' tidak ditemukan. AI butuh teks abstrak untuk bekerja.")
                         else:
-                            st.warning("Kolom standar tidak ditemukan.")
-
-                    # --- B. BAGIAN AI SYNTHESIS ---
-                    col_abstract_ai = next((c for c in ['Abstract', 'abstract', 'Summary'] if c in df_indo.columns), None)
-
-                    if not col_abstract_ai:
-                        st.warning("⚠️ Kolom 'Abstract' tidak ditemukan. AI butuh teks abstrak untuk bekerja.")
-                    else:
-                        df_indo_valid = df_indo.dropna(subset=[col_abstract_ai]).copy()
-                        
-                        if df_indo_valid.empty:
-                            st.info("Tidak ada dokumen Indonesia dengan abstrak yang valid.")
-                        else:
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            col_slider, col_btn = st.columns([2, 1])
-                            with col_slider:
-                                max_doc = min(len(df_indo_valid), 20)
-                                top_n_ai = st.slider("Jumlah dokumen teratas yang dibaca AI:", 1, max_doc, min(10, max_doc))
-                            with col_btn:
+                            df_indo_valid = df_indo.dropna(subset=[col_abstract_ai]).copy()
+                            
+                            if df_indo_valid.empty:
+                                st.info("Tidak ada dokumen Indonesia dengan abstrak yang valid.")
+                            else:
                                 st.markdown("<br>", unsafe_allow_html=True)
-                                btn_ai = st.button("🚀 Eksekusi AI Synthesis", type="primary", use_container_width=True)
+                                col_slider, col_btn = st.columns([2, 1])
+                                with col_slider:
+                                    max_doc = min(len(df_indo_valid), 20)
+                                    top_n_ai = st.slider("Jumlah dokumen teratas yang dibaca AI:", 1, max_doc, min(10, max_doc))
+                                with col_btn:
+                                    st.markdown("<br>", unsafe_allow_html=True)
+                                    btn_ai = st.button("🚀 Eksekusi AI Synthesis", type="primary", use_container_width=True)
 
-                            if btn_ai:
-                                with st.spinner("AI sedang membedah riset Indonesia..."):
-                                    if col_cite:
-                                        df_indo_valid[col_cite] = pd.to_numeric(df_indo_valid[col_cite], errors='coerce').fillna(0)
-                                        df_indo_valid = df_indo_valid.sort_values(by=col_cite, ascending=False)
-                                    
-                                    df_ai_target = df_indo_valid.head(top_n_ai)
-                                    konteks_riset = ""
-                                    for i, row in df_ai_target.iterrows():
-                                        judul = row[col_title] if col_title else "N/A"
-                                        konteks_riset += f"Judul {i+1}: {judul}\nAbstrak: {str(row[col_abstract_ai]).strip()}\n\n"
-
-                                    prompt_sys = """
-                                    Anda Asisten Peneliti Senior. Sintesis abstrak dari publikasi OLEH PENELITI INDONESIA ini.
-                                    Format Output Markdown:
-                                    1. 🎯 **Fokus Riset Utama** (Tema mayoritas)
-                                    2. 💡 **Temuan Signifikan** (Inovasi utama mereka)
-                                    3. 🚧 **Research Gap** (Apa yang belum banyak dibahas di dokumen ini?)
-                                    4. 🚀 **Rekomendasi Strategis** (Arah masa depan untuk konteks Indonesia)
-                                    Gunakan bahasa Indonesia profesional.
-                                    """
-                                    prompt_user = f"Data {top_n_ai} abstrak dokumen Indonesia:\n\n{konteks_riset}"
-
-                                    st.success("✅ Sintesis AI Dimulai...")
-                                    with st.container(border=True):
-                                        response_placeholder = st.empty()
-                                        full_resp = ""
+                                if btn_ai:
+                                    with st.spinner("AI sedang membedah riset Indonesia..."):
+                                        # 1. Persiapan & Pengurutan Data
+                                        if col_cite:
+                                            df_indo_valid[col_cite] = pd.to_numeric(df_indo_valid[col_cite], errors='coerce').fillna(0)
+                                            df_indo_valid = df_indo_valid.sort_values(by=col_cite, ascending=False)
                                         
-                                        try:
-                                            if AI_PROVIDER == "Mistral":
-                                                for chunk in stream_mistral(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
-                                                    if "❌ Error" in chunk: full_resp = chunk; break
-                                                    full_resp += chunk
-                                                    response_placeholder.markdown(full_resp + "▌")
-                                            elif AI_PROVIDER == "Google Gemini":
-                                                for chunk in stream_gemini(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
-                                                    if "❌ Error" in chunk: full_resp = chunk; break
-                                                    full_resp += chunk
-                                                    response_placeholder.markdown(full_resp + "▌")
-                                            elif AI_PROVIDER == "Groq":
-                                                for chunk in stream_groq(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
-                                                    if "❌ Error" in chunk: full_resp = chunk; break
-                                                    full_resp += chunk
-                                                    response_placeholder.markdown(full_resp + "▌")
-                                            else:
-                                                full_resp = "⚠️ Provider AI belum dipilih."
-                                                response_placeholder.markdown(full_resp)
+                                        df_ai_target = df_indo_valid.head(top_n_ai)
+                                        
+                                        # =========================================================
+                                        # FITUR BARU: INDEKS CORPUS TERPILIH (TRANSPARANSI DATA)
+                                        # =========================================================
+                                        with st.expander(f"📁 Indeks Corpus Terpilih (Total {len(df_ai_target)} Dokumen)", expanded=False):
+                                            corpus_markdown = ""
+                                            konteks_riset = ""
                                             
-                                            response_placeholder.markdown(full_resp) # Final output tanpa kursor
+                                            # Gunakan enumerate agar nomor urutnya bersih (1, 2, 3...)
+                                            for urutan, (index_asli, row) in enumerate(df_ai_target.iterrows(), start=1):
+                                                judul = str(row[col_title]).strip() if col_title and pd.notna(row[col_title]) else "Tanpa Judul"
+                                                abstrak = str(row[col_abstract_ai]).strip()
+                                                
+                                                # A. Tampilan UI (Daftar berurut di layar aplikasi Anda)
+                                                corpus_markdown += f"**[{urutan}]** {judul}  \n\n"
+                                                
+                                                # B. Konteks untuk AI (Sesuai dengan format prompt pilihan Anda)
+                                                konteks_riset += f"--- Dokumen {urutan} ---\nJudul: {judul}\nAbstrak: {abstrak}\n\n"
+                                                
+                                            # Render daftar ke layar
+                                            st.markdown(corpus_markdown)
+                                        # =========================================================
 
-                                            if "❌ Error" not in full_resp and full_resp != "":
-                                                st.download_button("📥 Unduh Laporan (.txt)", full_resp.encode('utf-8'), "Sintesis_Indonesia.txt", "text/plain")
-                                        except Exception as e:
-                                            st.error(f"Gagal memanggil API {AI_PROVIDER}: {e}")
+                                        # 3. Perbaikan Prompt: Tambahkan Aturan Sitasi Ketat
+                                        prompt_sys = """
+                                        Anda adalah Asisten Peneliti Senior. Sintesis abstrak dari publikasi OLEH PENELITI INDONESIA ini.
+                                        
+                                        Format Output Markdown:
+                                        1. 🎯 **Fokus Riset Utama** (Tema mayoritas)
+                                        2. 💡 **Temuan Signifikan** (Inovasi utama mereka)
+                                        3. 🚧 **Research Gap** (Apa yang belum banyak dibahas di dokumen ini?)
+                                        4. 🚀 **Rekomendasi Strategis** (Arah masa depan untuk konteks Indonesia)
+                                        
+                                        ATURAN WAJIB MENGUTIP (CITATION):
+                                        Jika Anda merujuk pada temuan dari dokumen tertentu, Anda WAJIB menyebutkan NAMA JUDUL PUBLIKASINYA (boleh disingkat agar rapi), BUKAN menggunakan angka, nomor urut, atau indeks (Jangan tulis "Judul 1", "Dokumen 734", dll).
+                                        
+                                        Gunakan bahasa Indonesia profesional dan akademis.
+                                        """
+                                        
+                                        prompt_user = f"Berikut adalah data {top_n_ai} dokumen riset Indonesia:\n\n{konteks_riset}\n\nSilakan lakukan sintesis sesuai aturan."
+
+                                        # =========================================================
+                                        # EKSEKUSI API DENGAN EFEK STREAMING (TYPING)
+                                        # =========================================================
+                                        st.success("✅ Sintesis AI Dimulai...")
+                                        
+                                        with st.container(border=True):
+                                            response_placeholder = st.empty()
+                                            full_resp = ""
+                                            
+                                            try:
+                                                if AI_PROVIDER == "Mistral":
+                                                    for chunk in stream_mistral(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                                        full_resp += chunk
+                                                        response_placeholder.markdown(full_resp + "▌")
+                                                elif AI_PROVIDER == "Google Gemini":
+                                                    for chunk in stream_gemini(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                                        full_resp += chunk
+                                                        response_placeholder.markdown(full_resp + "▌")
+                                                elif AI_PROVIDER == "Groq":
+                                                    for chunk in stream_groq(prompt_sys, prompt_user, AI_API_KEY, AI_MODEL):
+                                                        if "❌ Error" in chunk: full_resp = chunk; break
+                                                        full_resp += chunk
+                                                        response_placeholder.markdown(full_resp + "▌")
+                                                else:
+                                                    full_resp = "⚠️ Provider AI belum dipilih."
+                                                    response_placeholder.markdown(full_resp)
+                                                
+                                                response_placeholder.markdown(full_resp) # Final output tanpa kursor
+
+                                                if "❌ Error" not in full_resp and full_resp != "":
+                                                    st.download_button("📥 Unduh Laporan (.txt)", full_resp.encode('utf-8'), "Sintesis_Indonesia.txt", "text/plain")
+                                            except Exception as e:
+                                                st.error(f"Gagal memanggil API {AI_PROVIDER}: {e}")
+                    else:
+                        st.info("Dataset Indonesia kosong.")
                 else:
-                    st.info("Dataset Indonesia kosong.")
-            else:
-                st.error("Data Indonesia belum siap. Jalankan klasifikasi di tab sebelumnya.")
+                    st.error("Data Indonesia belum siap. Jalankan klasifikasi di tab sebelumnya.")
                 
 
                 # --- TAB 5: AI ADVISOR ---
