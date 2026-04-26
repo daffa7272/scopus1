@@ -1113,20 +1113,200 @@ with st.sidebar:
 # MENU UTAMA 0: GLOSSARY (EDUKASI)
 # ==============================
 if menu_selection == "📖 Library & Glossary":
-    st.title("📖 Library & Glossary")
-    st.markdown("Pusat dokumentasi dan ensiklopedia interaktif untuk memahami seluruh metodologi matematis dan bibliometrik yang digunakan di dalam perangkat lunak ini.")
-    st.markdown("---")
+    # =========================================================
+# HALAMAN MENU: LIBRARY & GLOSSARY
+# =========================================================
+        st.title("📖 Library & Glossary")
+        st.markdown("Pusat pengetahuan interaktif untuk membantu Anda memahami metrik, algoritma, dan metodologi yang digunakan di dalam **Biblio Analyzer Pro**.")
+        st.markdown("---")
+
+        # Membuat 3 Tab Kategori Pengetahuan
+        tab_glosarium, tab_hukum, tab_referensi = st.tabs([
+            "📚 Kamus Istilah (Glossary)", 
+            "📐 Hukum & Metodologi", 
+            "🔗 Referensi Eksternal"
+        ])
+
+        # ---------------------------------------------------------
+        # TAB 1: KAMUS ISTILAH UTAMA
+        # ---------------------------------------------------------
+        with tab_glosarium:
+            st.markdown("### 🧩 Kamus Istilah Analisis & Metrik")
+            st.caption("Gunakan kotak pencarian di bawah untuk memfilter istilah bibliometrik dan metrik komparasi secara cepat.")
     
-    cols_dict1, cols_dict2 = st.columns(2)
-    items = list(BIBLIOMETRIC_GLOSSARY.items())
-    
-    for i, (term, definition) in enumerate(items):
-        if i % 2 == 0:
-            with cols_dict1:
-                st.info(f"**{term}**\n\n{definition}")
-        else:
-            with cols_dict2:
-                st.success(f"**{term}**\n\n{definition}")
+            # Database Istilah Terpadu (Super Detail & Akademis)
+            kamus = {
+                "Jaccard Similarity Index": """
+**Jaccard Similarity** (Indeks Kesamaan Jaccard) adalah metrik statistik dari Teori Himpunan (*Set Theory*) yang digunakan untuk mengukur tingkat kesamaan dan keragaman antara dua himpunan data. Dalam konteks aplikasi ini, metrik ini mengukur seberapa tumpang-tindih (selaras) fokus topik riset Indonesia dengan tren Global.
+
+**Formula Matematis:**
+Jaccard Index dihitung dengan membagi ukuran irisan (*intersection*) dengan ukuran gabungan (*union*) dari dua himpunan topik:
+$$J(A,B) = \\frac{|A \\cap B|}{|A \\cup B|}$$
+
+**Cara Membaca Metrik Ini:**
+* **Skor Mendekati 0%:** Menandakan isolasi topik. Riset di satu wilayah sama sekali tidak membahas apa yang sedang tren di wilayah pembanding.
+* **Skor Mendekati 100%:** Menandakan konvergensi absolut. Kedua wilayah mengejar topik dan teknologi yang persis sama.
+* **Strategi:** Skor yang rendah (misal < 10%) adalah peluang emas untuk menemukan *Research Gap* (Celah Riset) untuk publikasi internasional.
+                """,
+                
+                "Base-100 Index (Tren Pertumbuhan)": """
+**Base-100 Index** (Indeks Berbasis 100) adalah teknik normalisasi data *time-series* yang diadopsi dari analisis ekonomi makro. Teknik ini sangat esensial untuk membandingkan laju pertumbuhan dari dua atau lebih wilayah yang memiliki perbedaan volume publikasi yang sangat ekstrem (misalnya, membandingkan 10.000 dokumen Global dengan 50 dokumen Indonesia).
+
+**Cara Kerjanya:**
+Alih-alih menampilkan jumlah dokumen asli, algoritma akan memaksa tahun pertama dari masing-masing wilayah untuk dimulai di titik awal yang sama, yaitu angka **100 (Indeks Dasar/Modal Awal)**. 
+
+**Cara Membaca Grafik:**
+* Jika pada tahun kelima garis menyentuh indeks **500**, itu berarti jumlah publikasi pada tahun tersebut telah **tumbuh 5 kali lipat (meningkat 400%)** dibandingkan tahun pertamanya.
+* Grafik ini memvisualisasikan **Momentum/Kecepatan**, bukan total kuantitas.
+                """,
+                
+                "Topik Frontier & Topik Endemik": """
+Klasifikasi ini merupakan hasil ekstraksi dari Diagram Venn komparatif untuk membantu memetakan lanskap teknologi dan kebijakan.
+
+* 🔍 **Topik Frontier (Garis Depan):** Ini adalah kata kunci mutakhir yang sedang mendominasi percakapan di jurnal-jurnal *Top-Tier* global, namun **belum banyak disentuh** oleh peneliti lokal. Mengambil topik dari daftar ini sangat direkomendasikan untuk meningkatkan *novelty* (kebaruan) riset.
+* 🌴 **Topik Endemik (Khas Lokal):** Ini adalah kata kunci yang sangat sering diteliti dan mendominasi publikasi di ekosistem lokal, tetapi bukan fokus utama dunia. Biasanya berisi studi kasus spesifik, metodologi standar, atau isu regulasi yang bersifat kedaerahan.
+* 🤝 **Topik Selaras (Shared Overlap):** Area irisan di mana komunitas lokal dan global berbicara dalam bahasa atau tren yang sama (misal: *Machine Learning, Sustainability*).
+                """,
+                
+                "RAG (Retrieval-Augmented Generation)": """
+**RAG** adalah arsitektur canggih dalam Kecerdasan Buatan (AI) yang menggabungkan kemampuan pemrosesan bahasa alami dari *Large Language Models* (seperti GPT atau Gemini) dengan sistem pencarian informasi eksternal.
+
+**Mengapa ini penting dalam analisis riset?**
+AI generatif biasa memiliki kelemahan mematikan yang disebut "Halusinasi" (mengarang fakta yang terdengar meyakinkan). Dengan arsitektur RAG di dalam fitur *AI Strategic Advisor*, mesin dilarang menebak-nebak. Mesin secara ketat dipaksa untuk **membaca, mengekstrak, dan menyintesis langsung dari basis data abstrak CSV** yang telah Anda unggah. Hasil sintesis, temuan, dan *research gap* yang dihasilkan 100% berbasis pada data Scopus riil Anda.
+                """,
+                
+                "H-Index": """
+**H-Index (Indeks-h)** adalah metrik tingkat penulis yang mengukur produktivitas sekaligus dampak sitasi dari publikasi yang dihasilkan oleh seorang peneliti atau institusi.
+
+**Cara Membaca:**
+Seorang peneliti memiliki indeks-h sebesar **10**, jika ia memiliki setidaknya **10 publikasi** yang masing-masing telah disitasi minimal **10 kali**. Metrik ini dirancang untuk mengoreksi kelemahan jika kita hanya menghitung total publikasi (yang mengabaikan kualitas) atau total sitasi (yang bisa didominasi oleh satu artikel yang kebetulan viral).
+                """
+            }
+
+            # Fitur Pencarian Interaktif
+            search_term = st.text_input("🔍 Cari istilah (Misal: Jaccard, Topik, Index)...", placeholder="Ketik di sini...", key="search_glossary")
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Logika Filter & Render Otomatis
+            ada_hasil = False
+            for istilah, definisi in kamus.items():
+                # Filter cerdas: Cari di judul istilah ATAU di dalam teks penjelasannya
+                if search_term.lower() in istilah.lower() or search_term.lower() in definisi.lower():
+                    # Jika ada kata kunci pencarian, otomatis expander terbuka. Jika kosong, tutup agar rapi.
+                    with st.expander(f"📌 **{istilah}**", expanded=True if search_term else False):
+                        st.markdown(definisi) # Menggunakan st.markdown agar formatting bold, bullet, dan math ter-render sempurna
+                    ada_hasil = True
+                    
+            if not ada_hasil:
+                st.warning(f"🕵️‍♂️ Istilah '{search_term}' tidak ditemukan di database kamus. Coba gunakan kata kunci yang lebih umum!")
+
+        # ---------------------------------------------------------
+        # TAB 2: HUKUM BIBLIOMETRIK DASAR
+        # ---------------------------------------------------------
+        with tab_hukum:
+            st.markdown("### ⚖️ Hukum Dasar Ilmu Bibliometrik")
+            st.info("**Tahukah Anda?** Ilmu Bibliometrik dibangun di atas tiga hukum empiris utama yang mengatur pola distribusi literatur ilmiah.")
+            
+            # 1. PENJELASAN 3 HUKUM (MENGGUNAKAN 3 KOLOM AGAR SEIMBANG)
+            col_h1, col_h2, col_h3 = st.columns(3)
+            
+            with col_h1:
+                with st.container(border=True):
+                    st.markdown("#### 👨‍🔬 Hukum Lotka")
+                    st.caption("**Fokus: Produktivitas Penulis**")
+                    st.write("Distribusi publikasi antar ilmuwan sangat tidak merata.")
+                    st.caption("Hanya sedikit penulis (Peneliti Inti) yang menghasilkan banyak publikasi, sementara mayoritas penulis hanya menghasilkan 1-2 karya.")
+                    st.write("🎯 **Fungsi:** Mencari *Key Opinion Leader* atau pakar utama.")
+
+            with col_h2:
+                with st.container(border=True):
+                    st.markdown("#### 📚 Hukum Bradford")
+                    st.caption("**Fokus: Penyebaran Jurnal**")
+                    st.write("Distribusi artikel spesifik menyebar secara eksponensial.")
+                    st.caption("Sebagian besar artikel penting menumpuk di segelintir 'Jurnal Inti', sisanya tersebar tipis di ribuan jurnal pinggiran.")
+                    st.write("🎯 **Fungsi:** Memilih target jurnal publikasi yang strategis.")
+
+            with col_h3:
+                with st.container(border=True):
+                    st.markdown("#### 🔠 Hukum Zipf")
+                    st.caption("**Fokus: Frekuensi Kata Kunci**")
+                    st.write("Distribusi penggunaan kata berbanding terbalik dengan peringkatnya.")
+                    st.caption("Beberapa kata kunci akan muncul sangat sering (dominan), sementara mayoritas kata kunci lainnya hanya muncul 1-2 kali (Long Tail).")
+                    st.write("🎯 **Fungsi:** Ekstraksi topik dan analisis tren (Text Mining).")
+
+            st.markdown("---")
+            
+            # 2. SIMULATOR INTERAKTIF DENGAN GRAFIK (FULL WIDTH)
+            st.markdown("### 🎢 Simulator Interaktif: Hukum Bradford")
+            st.write("Geser *slider* di bawah ini untuk melihat animasi visual bagaimana literatur menyebar secara tidak proporsional ke berbagai jurnal. Perhatikan bagaimana zona jurnal membengkak!")
+            
+            # Slider Interaktif
+            total_artikel = st.slider(
+                "Pilih Total Artikel yang Ditemukan (Misal: Topik 'Digital Twin'):", 
+                min_value=150, max_value=3000, value=900, step=150
+            )
+            
+            # Logika Simulasi Bradford (Rasio Jurnal 1 : n : n^2 untuk memuat jumlah artikel yang sama)
+            multiplier = 5 # Asumsi rasio n = 5
+            artikel_per_zona = total_artikel // 3
+            
+            core_journals = max(1, artikel_per_zona // 30) # Asumsi 1 jurnal inti memuat 30 artikel
+            zona2_journals = core_journals * multiplier
+            zona3_journals = core_journals * (multiplier ** 2)
+            
+            # Metrik Angka
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric(label="Zona 1 (Jurnal Inti)", value=f"{core_journals} Jurnal", delta=f"Memuat {artikel_per_zona} Artikel")
+            col_s2.metric(label="Zona 2 (Jurnal Relevan)", value=f"{zona2_journals} Jurnal", delta=f"Memuat {artikel_per_zona} Artikel", delta_color="off")
+            col_s3.metric(label="Zona 3 (Jurnal Pinggiran)", value=f"{zona3_journals} Jurnal", delta=f"Memuat {artikel_per_zona} Artikel", delta_color="inverse")
+            
+            # Visualisasi Data (Animasi Grafik)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Membentuk DataFrame untuk dirender menjadi grafik
+            import pandas as pd # Pastikan pandas sudah di-import di atas file Anda
+            df_bradford = pd.DataFrame({
+                "Zona": ["Zona 1 (Inti)", "Zona 2 (Relevan)", "Zona 3 (Pinggiran)"],
+                "Jumlah Jurnal yang Dibutuhkan": [core_journals, zona2_journals, zona3_journals]
+            })
+            
+            # Render Grafik Bar Streamlit (Otomatis memiliki transisi animasi saat slider digeser)
+            st.bar_chart(
+                df_bradford.set_index("Zona"), 
+                color="#ff4b4b", # Warna merah cerah agar menarik
+                height=300
+            )
+            
+            st.success("💡 **Insight Eksklusif:** Grafik di atas membuktikan bahwa Anda tidak perlu begadang membaca semua jurnal di dunia. Cukup cari dan baca **Jurnal di Zona 1** saja, Anda sudah menguasai 33% literatur paling penting di bidang tersebut!")
+        # ---------------------------------------------------------
+        # TAB 3: REFERENSI & STANDAR EKSTERNAL
+        # ---------------------------------------------------------
+        with tab_referensi:
+            st.markdown("### 🌐 Standar Metodologi & Direktori")
+            
+            st.markdown("""
+            Dalam melakukan *Literature Review* atau analisis bibliometrik tingkat lanjut, peneliti global umumnya merujuk pada standar berikut:
+            """)
+            
+            # Tombol Link Eksternal
+            st.link_button(
+                "📄 PRISMA Framework (Metodologi Systematic Review)", 
+                "http://www.prisma-statement.org/",
+                help="Protokol standar untuk melaporkan tinjauan pustaka sistematis dan meta-analisis."
+            )
+            st.link_button(
+                "🗂️ Scopus API Documentation", 
+                "https://dev.elsevier.com/sc_apis.html",
+                help="Dokumentasi resmi untuk pengembang yang menggunakan data Scopus."
+            )
+            st.link_button(
+                "🌍 WIPO IPC (International Patent Classification)", 
+                "https://www.wipo.int/classifications/ipc/en/",
+                help="Sistem klasifikasi paten internasional."
+            )
+            
+            st.markdown("---")
+            st.caption("Hak Cipta © 2026 Biblio Analyzer Pro. Dikembangkan untuk mendukung ekosistem riset strategis.")
 
 # ==============================
 # MENU UTAMA 1: DATA ACQUISITION
@@ -1447,7 +1627,14 @@ elif len(st.session_state.history) > 0:
                     
         # SUBTAB: BRADFORD & LOTKA
         with tab_stats2:
+            # =========================================================
+            # BAGIAN ATAS: RINGKASAN HUKUM LOTKA & BRADFORD
+            # =========================================================
             bl1, bl2 = st.columns(2)
+            
+            # Siapkan variabel penyimpan angka dinamis
+            jumlah_jurnal_zona_1 = 0 
+            
             with bl1:
                 st.markdown("**Hukum Penyebaran Bradford (Bradford's Law)**")
                 st.caption("Mengidentifikasi Jurnal Inti (Core Journals).")
@@ -1456,9 +1643,13 @@ elif len(st.session_state.history) > 0:
                     if not bradford_df.empty:
                         zone_counts = bradford_df['Bradford Zone'].value_counts().sort_index()
                         st.dataframe(zone_counts, use_container_width=True)
+                        
                         core_journals = bradford_df[bradford_df['Bradford Zone'] == "Zone 1 (Core)"]
-                        st.success(f"Terdapat **{len(core_journals)} Jurnal Inti**.")
-                    else: st.warning("Data jurnal tidak memadai.")
+                        jumlah_jurnal_zona_1 = len(core_journals) # Ambil angkanya secara dinamis!
+                        
+                        st.success(f"Terdapat **{jumlah_jurnal_zona_1} Jurnal Inti**.")
+                    else: 
+                        st.warning("Data jurnal tidak memadai.")
             
             with bl2:
                 st.markdown("**Hukum Lotka (Penulis & Produktivitas)**")
@@ -1475,7 +1666,70 @@ elif len(st.session_state.history) > 0:
                             ax_lotka.set_ylabel('% Penulis')
                             ax_lotka.legend()
                             st.pyplot(fig_lotka)
-                        except Exception: pass
+                        except Exception: 
+                            pass
+            
+            # =========================================================
+            # BAGIAN BAWAH: DETAIL IDENTITAS JURNAL & PENULIS
+            # =========================================================
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Perhatikan: Indentasi col_detail ini sekarang SEJAJAR dengan bl1 & bl2
+            col_detail1, col_detail2 = st.columns(2)
+
+            # --- 1. TABEL DAFTAR JURNAL INTI (ZONA 1) ---
+            with col_detail1:
+                st.markdown("#### 🏆 Daftar Jurnal Inti (Zona 1 Bradford)")
+                st.caption("Fokuskan target bacaan dan publikasi Anda pada jurnal-jurnal ini.")
+                
+                # Pastikan jumlah_jurnal_zona_1 > 0 dan gunakan variabel 'data'
+                if journal_col and jumlah_jurnal_zona_1 > 0:
+                    df_jurnal = data[journal_col].value_counts().reset_index()
+                    df_jurnal.columns = ['Nama Wadah Publikasi', 'Jumlah Artikel']
+                    
+                    # Menggunakan variabel dinamis (tidak di-hardcode '27' lagi)
+                    df_zona1 = df_jurnal.head(jumlah_jurnal_zona_1)
+                    
+                    st.dataframe(
+                        df_zona1, 
+                        use_container_width=True, 
+                        height=300,
+                        column_config={
+                            "Nama Wadah Publikasi": st.column_config.TextColumn(width="large"),
+                            "Jumlah Artikel": st.column_config.NumberColumn(format="%d 📄")
+                        }
+                    )
+                else:
+                    st.warning("Data Jurnal Inti belum tersedia.")
+
+            # --- 2. TABEL DAFTAR PENULIS PALING PRODUKTIF ---
+            with col_detail2:
+                st.markdown("#### 👑 Top Peneliti Paling Produktif")
+                st.caption("Berdasarkan distribusi elit Hukum Lotka di korpus data ini.")
+                
+                if author_col:
+                    # Menggunakan variabel 'data'
+                    authors_series = data[author_col].dropna().astype(str)
+                    all_authors = authors_series.str.split(r',|;').explode().str.strip()
+                    
+                    all_authors = all_authors[~all_authors.isin(['', '[No author name available]'])]
+                    
+                    df_penulis = all_authors.value_counts().reset_index()
+                    df_penulis.columns = ['Nama Peneliti', 'Total Publikasi']
+                    
+                    df_top_penulis = df_penulis.head(20)
+                    
+                    st.dataframe(
+                        df_top_penulis, 
+                        use_container_width=True, 
+                        height=300,
+                        column_config={
+                            "Nama Peneliti": st.column_config.TextColumn(width="large"),
+                            "Total Publikasi": st.column_config.NumberColumn(format="%d ✍️")
+                        }
+                    )
+                else:
+                    st.warning("Kolom nama penulis tidak ditemukan di data ini.")
 
         # SUBTAB: GEO MAPPING
         with tab_stats3:
@@ -2039,9 +2293,7 @@ elif len(st.session_state.history) > 0:
                                 st.session_state.used_delim = used_delim
 
             with col_c2:
-                st.download_button(label="📥 Unduh Keadaan Dataset Saat Ini (.csv)", data=convert_df_to_csv(base_data), file_name="scopus_dataset_cleaned_progress.csv", mime="text/csv", use_container_width=True)
                 st.markdown("---")
-                
                 if st.session_state.get('preview_action'):
                     st.success(f"✅ **Tindakan Transformasi Selesai:** {st.session_state.preview_action}")
                     st.markdown("##### 🔍 Layar Pratinjau (Sebelum vs Sesudah)")
@@ -2069,6 +2321,7 @@ elif len(st.session_state.history) > 0:
                     if st.button("✖️ Tutup Panel Pratinjau"):
                         st.session_state.preview_action = None
                         st.rerun()
+                st.download_button(label="📥 Unduh Keadaan Dataset Saat Ini (.csv)", data=convert_df_to_csv(base_data), file_name="scopus_dataset_cleaned_progress.csv", mime="text/csv", use_container_width=True)
                 st.markdown("---")
                 
                 if st.session_state.clustering_result is not None:
