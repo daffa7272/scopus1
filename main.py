@@ -1,3 +1,21 @@
+"""
+=============================================================================
+SCIENTIFIC BIBLIOMETRIC AI ANALYZER (ENTERPRISE ULTIMATE EDITION)
+=============================================================================
+Sistem Perangkat Lunak Skala Penuh untuk Akuisisi, Pembersihan, Analisis, 
+dan Pemetaan Sains (Science Mapping) Berbasis Data Bibliometrik.
+
+Versi Enterprise ini dilengkapi dengan:
+- Natural Language Processing (NLP)
+- Machine Learning Topic Modeling (LDA)
+- Semantic Information Retrieval (TF-IDF Cosine Similarity) dengan Multi-Template
+- Geo-spatial Choropleth Mapping (Scopus & WIPO Patents Hybrid)
+- Advanced Graph Topology (NetworkX & Pyvis)
+- Generative AI Integration (Mistral, Gemini, Groq)
+- Local Storage Persistence (Penyimpanan API & Konfigurasi)
+=============================================================================
+"""
+
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -1316,10 +1334,12 @@ elif menu_selection == "📥 Data Acquisition":
     st.markdown("Mulai proyek bibliometrik Anda dengan mengimpor dataset langsung dari API server Scopus atau mengunggah data lokal milik Anda sendiri.")
    
     if "history" in st.session_state and len(st.session_state.history) > 0:
-            df_aktif = st.session_state.history[0]
+            # Ambil step terakhir yang aktif
+            current = st.session_state.current_step
+            df_aktif = st.session_state.history[current]
             
-            # Mengambil nama sumber data (misal: "Data Awal (Scopus)" atau "Data Awal (BigQuery)")
-            sumber_data = st.session_state.history_actions[0] if "history_actions" in st.session_state else "Database Sistem"
+            # Mengambil nama tindakan terakhir
+            sumber_data = st.session_state.history_actions[current] if "history_actions" in st.session_state else "Database Sistem"
             
             # Menampilkan kotak hijau tebal yang tidak akan hilang meski di-refresh
             st.success(
@@ -1875,7 +1895,7 @@ elif len(st.session_state.history) > 0:
                         # =========================================================
                         # 1. AMBIL DATA & PERSIAPAN KOLOM
                         # =========================================================
-                        df_aktif = st.session_state.history[0].copy()
+                        df_aktif = st.session_state.history[st.session_state.current_step].copy()
 
                         # --- SMART EXTRACTOR KHUSUS DATA PATEN / FORMAT LAIN ---
                         # Jika Year_Numeric belum ada, kita paksa buat dari kolom yang tersedia
